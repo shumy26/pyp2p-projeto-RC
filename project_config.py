@@ -28,23 +28,24 @@ def write_config():
         file_path = pathlib.Path("config.json")
         file_path.touch(exist_ok=True)
         
-        config_dict = {}
+        if os.path.getsize(file_path) == 0:
+            config_dict = {}
         
-        config_dict["rdv_name"] = 'pyp2p.mfcaetano.cc'
-        config_dict["rdv_port"] = 8080
-        config_dict["name"] = getpass.getuser()
-        # 65540 = 65535 + 5
-        for port in range(35500,65540,5):
-            if (not isPortUsed(port)):
-                config_dict["port"] = port
-                break
-        config_dict["namespace"] = "UnB"
-        config_dict["max_reconnect_attempts"] = 10
-        config_dict["keep_alive_interval"] = 30
-        config_dict["features"] = ["ack", "metrics"]
-        
-        with open("config.json", "w") as config_file:
-            json.dump(config_dict, config_file, indent=4, ensure_ascii=False)
+            config_dict["rdv_name"] = 'pyp2p.mfcaetano.cc'
+            config_dict["rdv_port"] = 8080
+            config_dict["name"] = getpass.getuser()
+            # 65540 = 65535 + 5
+            for port in range(35500,65540,5):
+                if (not isPortUsed(port)):
+                    config_dict["port"] = port
+                    break
+            config_dict["namespace"] = "UnB"
+            config_dict["max_reconnect_attempts"] = 10
+            config_dict["keep_alive_interval"] = 30
+            config_dict["features"] = ["ack", "metrics"]
+            
+            with open("config.json", "w") as config_file:
+                json.dump(config_dict, config_file, indent=4, ensure_ascii=False)
 
     except:
         print("Something went wrong when trying to write to 'config.json'.")
