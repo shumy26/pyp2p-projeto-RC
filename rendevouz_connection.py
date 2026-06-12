@@ -258,13 +258,6 @@ if __name__ == '__main__':
     register(clientTTL=test_ttl)
     discover()
 
-# protocol_data is a dictionary with two lists, that contains dictionaries.
-# The first valaue of the dictionary refers to the rendevouz protocol.
-# the second element, to the protocol between peers.
-# Order in list - Rendevouz: REGISTER, DISCOVER, UNREGISTER.
-# Order in list - P2P: HELLO, SEND, PUB, BYE, PING.
-# Each element in the list is a valid JSON object.
-
 
 
 
