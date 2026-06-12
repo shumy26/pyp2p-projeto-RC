@@ -15,7 +15,7 @@ def isPortUsed(port):
     except OSError:
         return True
 
-# This function creates a standar 'config.json' based on the current user name.
+# This function creates a standard 'config.json' based on the current user name.
 # It is only called when you register the first time.
 # So you can actually alter this config file later on without problems.
 
