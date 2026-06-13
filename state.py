@@ -22,6 +22,7 @@ def state(discover_dict):
         with open(file_path, 'w') as peer_file:
             json.dump(peers_list, peer_file, indent=4, ensure_ascii=False)
             print(peers_list)
+            print()
             return {}
     except:
         print("Something went wrong during the update of PeerTabel.json")
