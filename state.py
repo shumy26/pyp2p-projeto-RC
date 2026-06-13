@@ -2,7 +2,7 @@ import pathlib
 import os
 import time
 import json
-import rendevouz_connection2 as rdv
+import rendevouz_connection as rdv
 
 def state(discover_dict):
     if discover_dict == None:
