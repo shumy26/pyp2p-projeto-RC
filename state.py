@@ -8,6 +8,8 @@ def state(discover_dict):
     if discover_dict == None:
         print("There were no peers to be found within this search.")
         return None
+    elif discover_dict == {}:
+        return []
     peers_list = discover_dict["peers"].copy()
     
     cwd = os.path.dirname(os.path.realpath(__file__))
@@ -21,9 +23,9 @@ def state(discover_dict):
     try:
         with open(file_path, 'w') as peer_file:
             json.dump(peers_list, peer_file, indent=4, ensure_ascii=False)
-            print(peers_list)
-            print()
-            return {}
+            #print(peers_list)
+            #print()
+            return peers_list
     except:
         print("Something went wrong during the update of PeerTabel.json")
         return None
@@ -32,7 +34,7 @@ if __name__ == '__main__':
     rdv.register(clientTTL=240)
     n = 5
     while n > 0:
-        state_change = state(rdv.discover(interval2discover=0))
+        state_change = state(rdv.discover())
         time.sleep(0.2)
         if state_change == None:
             break

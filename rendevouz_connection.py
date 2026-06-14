@@ -94,10 +94,10 @@ def register(clientTTL=None):
                 # Defines the JSON to Register
                 register_dict = define_rdv_protocol('REGISTER', ttl=clientTTL)
                 request_string = json.dumps(register_dict) + '\n'
-                print(request_string)
+                # print(request_string)
                 clientSocket.sendall(request_string.encode())
                 response_string = clientSocket.recv(32768).decode('utf-8')
-                print(response_string)
+                # print(response_string)
                 response_dict = json.loads(response_string)
                 
                 if response_dict["status"] == "ERROR":
@@ -113,6 +113,8 @@ def register(clientTTL=None):
                         case "bad_port":
                             print("The port must be an integer between 1 and 65535.")
                             return None
+                else:
+                    print("You have been registered in the network.")
             
             # Raised when the socket could not connect to the IP address
             # To treat the continuity or beggining of the program as a whole, we can do it when calling the function.
@@ -129,9 +131,11 @@ def register(clientTTL=None):
     return response_dict
 
 # Discover Protocol: Namespace=None just means that, as the field is optional, we don't want it sent to the rendevouz
-# interval2discover is the interval in which the program sent the discover protocol. The standard is 20 times per minute (3 seconds)
+# interval2discover is the interval in which the program sent the discover protocol. The standard is 20 times per minute (3 seconds) 
+# Update: This is an old parameter. Now the main file will handle this afterwards.
+# -----------------------------------------------------------------------------------------
 
-def discover(namespace=None, interval2discover=3):
+def discover(namespace=None):
     
     config_dict = cfg.getConfig()
     connIP = config_dict["rdv_name"]
@@ -145,56 +149,51 @@ def discover(namespace=None, interval2discover=3):
             print("The IP address of the rendevouz must be a string.")
             return None
     else:
-        while True:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as clientSocket:    
-                connection_tuple = (connIP,connPort)
-                try:
-                    clientSocket.connect(connection_tuple)
-                
-                    # Defines the JSON to Discover
-                    discover_dict = define_rdv_protocol('DISCOVER', namespace=namespace)
-                    request_string = json.dumps(discover_dict) + '\n'
-                    # print(request_string)
-                    clientSocket.sendall(request_string.encode())
-                    response_string = clientSocket.recv(32768).decode('utf-8')
-                    print(response_string)
-                    response_dict = json.loads(response_string)
-                
-                    if response_dict["status"] == "ERROR":
-                        clientSocket.shutdown(socket.SHUT_RDWR)
-                        match response_dict["message"]:
-                            case "peer_not_registered":
-                                print("You are not registered in the network!")
-                                return None
-                            case "bad_namespace":
-                                print("The namespace is invalid. It must be a string between 1 and 64 characters.")
-                                return None
-                    
-                    if (response_dict["status"] == "OK" and len(response_dict["peers"])) == 0:
-                        print("There is no peer with the namespace that you entered.")
-                        return None
-                            
-                    # This condition just verifies if interval2discover is 0.
-                    # If it is, then it just returns the response one time as required.
-                    # If it is not an intege, it will raise a 'TypeError'
-                    if not bool(float(interval2discover)):
-                        break
-                    time.sleep(interval2discover)
-                # Raised when the socket could not connect to the IP address
-                except TimeoutError:
-                    print("Could not connect to server.")
-                    return None
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as clientSocket:    
+            connection_tuple = (connIP,connPort)
+            try:
+                clientSocket.connect(connection_tuple)
             
-                # Raised when the user or the program interrupts the execution with a signal.
-                except (InterruptedError, KeyboardInterrupt):
-                    print("The program was interrupted by a signal (like Ctrl+C).")
-                    return None
+                # Defines the JSON to Discover
+                discover_dict = define_rdv_protocol('DISCOVER', namespace=namespace)
+                request_string = json.dumps(discover_dict) + '\n'
+                # print(request_string)
+                clientSocket.sendall(request_string.encode())
+                response_string = clientSocket.recv(32768).decode('utf-8')
+                # print(response_string)
+                response_dict = json.loads(response_string)
+            
+                if response_dict["status"] == "ERROR":
+                    clientSocket.shutdown(socket.SHUT_RDWR)
+                    match response_dict["message"]:
+                        case "peer_not_registered":
+                            print("You are not registered in the network!")
+                            return {}
+                        case "bad_namespace":
+                            print("The namespace is invalid. It must be a string between 1 and 64 characters.")
+                            return None
                 
-                except TypeError:
-                    print("A type error occurred when a parameter was passed to a function. You probably didn't pass an integer or a float as a 'interval2discover'.")
+                if (response_dict["status"] == "OK" and len(response_dict["peers"])) == 0:
+                    print("There is no peer with the namespace that you entered.")
                     return None
+
+            # Raised when the socket could not connect to the IP address
+            except TimeoutError:
+                print("Could not connect to server.")
+                return None
+        
+            # Raised when the user or the program interrupts the execution with a signal.
+            except (InterruptedError, KeyboardInterrupt):
+                print("The program was interrupted by a signal (like Ctrl+C).")
+                return None
+            
+            except TypeError:
+                print("A type error occurred when a parameter was passed to a function.")
+                return None
                 
     return response_dict
+
+# -------------------------------------------------------------------
 
 def unregister():
     
@@ -217,10 +216,10 @@ def unregister():
                 # Defines the JSON to Register
                 unregister_dict = define_rdv_protocol('UNREGISTER', name=config_dict["name"], namespace=config_dict["namespace"], port=config_dict["port"])
                 request_string = json.dumps(unregister_dict) + '\n'
-                print(request_string)
+                # print(request_string)
                 clientSocket.sendall(request_string.encode())
                 response_string = clientSocket.recv(32768).decode('utf-8')
-                print(response_string)
+                # print(response_string)
                 response_dict = json.loads(response_string)
                 
                 clientSocket.shutdown(socket.SHUT_RDWR)
@@ -238,7 +237,6 @@ def unregister():
                             return None
                 else:
                     print("You have been successfully unregistered.")
-                    return {}
             
             # Raised when the socket could not connect to the IP address
             except TimeoutError:
@@ -249,7 +247,8 @@ def unregister():
             except (InterruptedError, KeyboardInterrupt):
                 print("The program was interrupted by a signal (like Ctrl+C).")
                 return None
-            
+    
+    # Only returns it when it is "OK"
     return response_dict
 
 # Sends to the Rendevouz
@@ -258,6 +257,12 @@ if __name__ == '__main__':
     register(clientTTL=test_ttl)
     discover()
 
+# protocol_data is a dictionary with two lists, that contains dictionaries.
+# The first valaue of the dictionary refers to the rendevouz protocol.
+# the second element, to the protocol between peers.
+# Order in list - Rendevouz: REGISTER, DISCOVER, UNREGISTER.
+# Order in list - P2P: HELLO, SEND, PUB, BYE, PING.
+# Each element in the list is a valid JSON object.
 
 
 
