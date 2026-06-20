@@ -1,36 +1,52 @@
+import asyncio
 import json
 # import pathlib
 # import sys
 # import os
-import socket
+# import socket
 import time
 import project_config as cfg
 
 # In this code, if a return statement is "None", then it is either an error that occurred or
-# an invalid parameter tha was verified before an error would occur.
-# If a return is "{}" (an empty dictionary)
-
-# cfg.write_config(): Writes to config file;
-# cfg.getConfig(): Gets the configuration as a dictionary;
-# cfg.change_config(): Changes the config file.
+# an invalid parameter that was verified before an error would occur.
 
 # This function defines the JSON object that each 'action_type' needs on the rendevouz.
-# It alters the config file if it is called with any of the arguments below (except for 'ttl')
+# It alters the config file if it is called with any of the arguments below.
 
-def define_rdv_protocol(action_type:str, name=None, namespace=None, port=None, ttl=None):
+def define_rdv_protocol(action_type:str, namespace=None, name=None, port=None, ttl=None):
+    """
+    Defines the protocol request based on the type of the request.
+    
+    Args:
+        action_type (str): REGISTER, DISCOVER or UNREGISTER.
+        
+        namespace (str): The namespace in which you desire to be registered in the network.
+        
+        name (str): The namespace desired to be registered in the network.
+        
+        port (int: 1-65535): The port in which your device will communicate with the network.
+        
+        ttl (int|float): The Time To Live of your register.
+        
+    Returns:
+        protocol_field (dict): The request based on the protocol.
+        
+        None (None): If an error occur.
+    """
     try:
         action_type = action_type.upper()
         protocol_field = {}
         
-        config_dict = cfg.getConfig()
-        
         if action_type == 'REGISTER':
             protocol_field["type"] = action_type
-            protocol_field["namespace"] = str(config_dict["namespace"])
-            protocol_field["name"] = str(config_dict["name"])
-            protocol_field["port"] = int(config_dict["port"])
-            if ttl != None:
+            protocol_field["namespace"] = str(namespace)
+            protocol_field["name"] = str(name)
+            protocol_field["port"] = int(port)
+            # This defines that 'ttl' will only will be written to the protocol if it is a valid number
+            if isinstance(ttl,(int,float)):
                 protocol_field["ttl"] = ttl
+            
+            return protocol_field
         
         elif action_type == 'DISCOVER':
             protocol_field["type"] = action_type
@@ -40,29 +56,21 @@ def define_rdv_protocol(action_type:str, name=None, namespace=None, port=None, t
             if (bool(namespace)):
                 namespace = str(namespace)
                 protocol_field["namespace"] = namespace
-                cfg.change_config(namespace=namespace)
+
+            return protocol_field
 
         elif action_type == 'UNREGISTER':
             protocol_field["type"] = action_type
-            protocol_field["namespace"] = str(config_dict["namespace"])
-            
-            #name = str(name)
-            #if (not bool(name)):
-            protocol_field["name"] = str(config_dict["name"])
-            #else:
-                #protocol_field["name"] = name
-                #cfg.change_config(name=name)
-                        
-            #port = int(port)
-            #if (not bool(port)):
-            protocol_field["port"] = int(config_dict["port"])
-            #else:
-                #protocol_field["port"] = port
-                #cfg.change_config(port=port)
+            protocol_field["namespace"] = str(namespace)
+            protocol_field["name"] = str(name)
+            protocol_field["port"] = int(port)
+ 
+            return protocol_field
+        
         else:
-            print("There is no such action available to communicate with the rendevouz.\n(Maybe you misspelled it?)")
-            return {}
-        return protocol_field
+            print("There is no such action available to communicate with the rendevouz. (Maybe you misspelled it?)")
+            return None
+
     except TypeError:
         print("Some argument is of the incorrect type.")
         return None
@@ -70,15 +78,18 @@ def define_rdv_protocol(action_type:str, name=None, namespace=None, port=None, t
         return None
 
 # Registers the user in the network, using the Rendevouz IP address.
-# As I am doing right now, the user would define the ttl or just leave as 'None', which
-# would make the rendevouz define ttl=7200s (2h). This is not in the config file as per now.
+# As per now, the ttl is defined in the config file. If there are no 'ttl' parameter, that
+# will make the rendevouz define ttl=7200s (2h).
 
-def register(clientTTL=None):
+async def register():
     
+    # Get the configuration
     config_dict = cfg.getConfig()
+    # Get the address and port to the server/rendevouz
     connIP = config_dict["rdv_name"]
     connPort = config_dict["rdv_port"]
     
+    # Verifies if it is a valid address and port value
     if not (isinstance(connIP, str) and isinstance(connPort,int)):
         if connPort < 1 and connPort > 65535:
             print("The port chosen for the rendevouz is out of range. It must be between 1 and 65535.")
@@ -86,116 +97,131 @@ def register(clientTTL=None):
         else:
             print("The IP address of the rendevouz must be a string.")
             return None
-    else:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as clientSocket:    
-            connection_tuple = (connIP,connPort)
-            try:
-                clientSocket.connect(connection_tuple)
-                # Defines the JSON to Register
-                register_dict = define_rdv_protocol('REGISTER', ttl=clientTTL)
-                request_string = json.dumps(register_dict) + '\n'
-                # print(request_string)
-                clientSocket.sendall(request_string.encode())
-                response_string = clientSocket.recv(32768).decode('utf-8')
-                # print(response_string)
-                response_dict = json.loads(response_string)
-                
-                if response_dict["status"] == "ERROR":
-                    clientSocket.shutdown(socket.SHUT_RDWR)
-                    match response_dict["message"]:
-                        case "bad_name":
-                            print("The name is invalid. It must be a string between 1 and 64 characters.")
-                            return None
-                        case "bad_namespace":
-                            print("The namespace is invalid. It must be a string between 1 and 64 characters.")
-                            return None
-                        # TTL treated on function define_rdv_protocol()
-                        case "bad_port":
-                            print("The port must be an integer between 1 and 65535.")
-                            return None
-                else:
-                    print("You have been registered in the network.")
-            
-            # Raised when the socket could not connect to the IP address
-            # To treat the continuity or beggining of the program as a whole, we can do it when calling the function.
-            # If it is None, than an error occured, and we can just not initiate the program and tell the user that something happened.
-            except TimeoutError:
-                print("Could not connect to server.")
-                return None
-            
-            # Raised when the user or the program interrupts the execution with a signal.
-            except (InterruptedError, KeyboardInterrupt):
-                print("The program was interrupted by a signal (like Ctrl+C).")
-                return None
-            
-    return response_dict
-
-# Discover Protocol: Namespace=None just means that, as the field is optional, we don't want it sent to the rendevouz
-# interval2discover is the interval in which the program sent the discover protocol. The standard is 20 times per minute (3 seconds) 
-# Update: This is an old parameter. Now the main file will handle this afterwards.
-# -----------------------------------------------------------------------------------------
-
-def discover(namespace=None):
     
-    config_dict = cfg.getConfig()
-    connIP = config_dict["rdv_name"]
-    connPort = config_dict["rdv_port"]
-    
-    if not (isinstance(connIP, str) and isinstance(connPort,int)):
-        if connPort < 1 and connPort > 65535:
-            print("The port chosen for the rendevouz is out of range. It must be between 1 and 65535.")
-            return None
-        else:
-            print("The IP address of the rendevouz must be a string.")
-            return None
-    else:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as clientSocket:    
-            connection_tuple = (connIP,connPort)
-            try:
-                clientSocket.connect(connection_tuple)
-            
-                # Defines the JSON to Discover
-                discover_dict = define_rdv_protocol('DISCOVER', namespace=namespace)
-                request_string = json.dumps(discover_dict) + '\n'
-                # print(request_string)
-                clientSocket.sendall(request_string.encode())
-                response_string = clientSocket.recv(32768).decode('utf-8')
-                # print(response_string)
-                response_dict = json.loads(response_string)
-            
-                if response_dict["status"] == "ERROR":
-                    clientSocket.shutdown(socket.SHUT_RDWR)
-                    match response_dict["message"]:
-                        case "peer_not_registered":
-                            print("You are not registered in the network!")
-                            return {}
-                        case "bad_namespace":
-                            print("The namespace is invalid. It must be a string between 1 and 64 characters.")
-                            return None
-                
-                if (response_dict["status"] == "OK" and len(response_dict["peers"])) == 0:
-                    print("There is no peer with the namespace that you entered.")
-                    return None
-
-            # Raised when the socket could not connect to the IP address
-            except TimeoutError:
-                print("Could not connect to server.")
-                return None
+    # Defines the variables used in the protocol
+    namespace, name, port, ttl = (config_dict.get("namespace"), config_dict.get("name"), config_dict.get("port"), config_dict.get("ttl"))
+    try:
+        # Connects to the server/rendevouz
+        reader, writer = await asyncio.open_connection(connIP,connPort)
+        # Defines the protocol request to be sent
+        register_dict = define_rdv_protocol('REGISTER', namespace, name, port, ttl)
+        request_string = json.dumps(register_dict) + '\n'
         
-            # Raised when the user or the program interrupts the execution with a signal.
-            except (InterruptedError, KeyboardInterrupt):
-                print("The program was interrupted by a signal (like Ctrl+C).")
-                return None
-            
-            except TypeError:
-                print("A type error occurred when a parameter was passed to a function.")
-                return None
+        # Writes to buffer and send the request
+        writer.write(request_string.encode())
+        await writer.drain()
+        
+        # Wait until receives a response
+        response_string = await reader.read(32768)
+        response_dict = json.loads(response_string.decode('utf-8'))
+        
+        # Verifies if the server returned an "ERROR status"
+        if response_dict["status"] == "ERROR":
+            match response_dict["message"]:
+                case "bad_name":
+                    print("The name is invalid. It must be a string between 1 and 64 characters.")
+                    return None
+                case "bad_namespace":
+                    print("The namespace is invalid. It must be a string between 1 and 64 characters.")
+                    return None
+                # TTL treated on function define_rdv_protocol()
+                case "bad_port":
+                    print("The port must be an integer between 1 and 65535.")
+                    return None
+        else:
+            print("You have been registered in the network.")
+        
+        # Close the connection and returns the response of the server/rendevouz
+        writer.close()
+        await writer.wait_closed()
+        return response_dict
+    
+    # Raised when the server refuses the connection
+    except ConnectionRefusedError:
+        print("The server refused to connect.")
+        return None
+    # Raised when the socket could not connect to the IP address in a given time
+    except TimeoutError:
+        print("Could not connect to server due to timed out attempt.")
+        return None
+    # Raised when there are possibly no routes to that server
+    except OSError:
+        print("There was a network issue and it was not possible to connect to the server.")
+        return None
+    # Raised when the user or the program interrupts the execution with a signal
+    except (InterruptedError, KeyboardInterrupt):
+        print("The program was interrupted by a signal (like Ctrl+C).")
+        return None
+
+async def discover(namespace=None):
+
+    config_dict = cfg.getConfig()
+    connIP = config_dict["rdv_name"]
+    connPort = config_dict["rdv_port"]
+    
+    if not (isinstance(connIP, str) and isinstance(connPort,int)):
+        if connPort < 1 and connPort > 65535:
+            print("The port chosen for the rendevouz is out of range. It must be between 1 and 65535.")
+            return None
+        else:
+            print("The IP address of the rendevouz must be a string.")
+            return None
+    
+    try:
+        reader, writer = await asyncio.open_connection(connIP,connPort)
+        discover_dict = define_rdv_protocol('DISCOVER',namespace)
+        request_string = json.dumps(discover_dict) + '\n'
+
+        writer.write(request_string.encode())
+        await writer.drain()
+        
+        response_string = await reader.read(32768)
+        response_dict = json.loads(response_string.decode('utf-8'))
+        
+        if response_dict["status"] == "ERROR":
+            match response_dict["message"]:
+                case "peer_not_registered":
+                    print("You are not registered in the network!")
+                    return {}
+                case "bad_namespace":
+                    print("The namespace is invalid. It must be a string between 1 and 64 characters.")
+                    return None
                 
-    return response_dict
+        elif (response_dict["status"] == "OK" and len(response_dict["peers"]) == 0):
+            print("There is no peer with the namespace that you entered.")
+            return None
 
-# -------------------------------------------------------------------
-
-def unregister():
+        writer.close()
+        await writer.wait_closed()
+        return response_dict
+    
+    except ConnectionRefusedError:
+        print("The server refused to connect.")
+        return None
+    except TimeoutError:
+        print("Could not connect to server due to timed out attempt.")
+        return None
+    except OSError:
+        print("There was a network issue and it was not possible to connect to the server.")
+        return None
+    except TypeError:
+        print("A type error occurred when a parameter was passed to a function.")
+        try:
+            writer.close()
+            await writer.wait_closed()
+            return None
+        except:
+            return None  
+    except (InterruptedError, KeyboardInterrupt):
+        print("The program was interrupted by a signal (like Ctrl+C).")
+        try:
+            writer.close()
+            await writer.wait_closed()
+            return None
+        except:
+            return None
+        
+async def unregister():
     
     config_dict = cfg.getConfig()
     connIP = config_dict["rdv_name"]
@@ -208,61 +234,52 @@ def unregister():
         else:
             print("The IP address of the rendevouz must be a string.")
             return None
-    else:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as clientSocket:    
-            connection_tuple = (connIP,connPort)
-            try:
-                clientSocket.connect(connection_tuple)
-                # Defines the JSON to Register
-                unregister_dict = define_rdv_protocol('UNREGISTER', name=config_dict["name"], namespace=config_dict["namespace"], port=config_dict["port"])
-                request_string = json.dumps(unregister_dict) + '\n'
-                # print(request_string)
-                clientSocket.sendall(request_string.encode())
-                response_string = clientSocket.recv(32768).decode('utf-8')
-                # print(response_string)
-                response_dict = json.loads(response_string)
-                
-                clientSocket.shutdown(socket.SHUT_RDWR)
-                if response_dict["status"] == "ERROR":
-                    match response_dict["message"]:
-                        case "bad_name":
-                            print("The name is invalid. It must be a string between 1 and 64 characters.")
-                            return None
-                        case "bad_namespace":
-                            print("The namespace is invalid. It must be a string between 1 and 64 characters.")
-                            return None
-                        # TTL treated on function define_rdv_protocol()
-                        case "bad_port":
-                            print("The port must be an integer between 1 and 65535.")
-                            return None
-                else:
-                    print("You have been successfully unregistered.")
-            
-            # Raised when the socket could not connect to the IP address
-            except TimeoutError:
-                print("Could not connect to server.")
-                return None
-            
-            # Raised when the user or the program interrupts the execution with a signal.
-            except (InterruptedError, KeyboardInterrupt):
-                print("The program was interrupted by a signal (like Ctrl+C).")
-                return None
     
-    # Only returns it when it is "OK"
-    return response_dict
+    namespace, name, port = (config_dict.get("namespace"), config_dict.get("name"), config_dict.get("port"))
+    try:
+        reader, writer = await asyncio.open_connection(connIP,connPort)
+        register_dict = define_rdv_protocol('UNREGISTER', namespace, name, port)
+        request_string = json.dumps(register_dict) + '\n'
 
-# Sends to the Rendevouz
+        writer.write(request_string.encode())
+        await writer.drain()
+        
+        response_string = await reader.read(32768)
+        response_dict = json.loads(response_string.decode('utf-8'))
+        
+        if response_dict["status"] == "ERROR":
+            match response_dict["message"]:
+                case "bad_name":
+                    print("The name is invalid. It must be a string between 1 and 64 characters.")
+                    return None
+                case "bad_namespace":
+                    print("The namespace is invalid. It must be a string between 1 and 64 characters.")
+                    return None
+                case "bad_port":
+                    print("The port must be an integer between 1 and 65535.")
+                    return None
+        else:
+            print("You have been successfully unregistered.")
+        
+        writer.close()
+        await writer.wait_closed()
+        return response_dict
+    
+    except ConnectionRefusedError:
+        print("The server refused to connect.")
+        return None
+    except TimeoutError:
+        print("Could not connect to server due to timed out attempt.")
+        return None
+    except OSError:
+        print("There was a network issue and it was not possible to connect to the server.")
+        return None
+    except (InterruptedError, KeyboardInterrupt):
+        print("The program was interrupted by a signal (like Ctrl+C).")
+        return None
+
 if __name__ == '__main__':
-    test_ttl = int(input())
-    register(clientTTL=test_ttl)
-    discover()
-
-# protocol_data is a dictionary with two lists, that contains dictionaries.
-# The first valaue of the dictionary refers to the rendevouz protocol.
-# the second element, to the protocol between peers.
-# Order in list - Rendevouz: REGISTER, DISCOVER, UNREGISTER.
-# Order in list - P2P: HELLO, SEND, PUB, BYE, PING.
-# Each element in the list is a valid JSON object.
-
-
-
+    asyncio.run(register())
+    asyncio.run(discover())
+    time.sleep(5)
+    asyncio.run(unregister())
