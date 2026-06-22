@@ -1,8 +1,6 @@
 import pathlib
 import os
-import time
 import json
-import rendevouz_connection as rdv
 
 # This function defines the state of the PeerTable, updating it as it is necessary.
 
@@ -38,8 +36,6 @@ def state(discover_dict):
         print("Something went wrong during the update of PeerTabel.json")
         return None
                     
-if __name__ == '__main__':
-
     
     
                 
