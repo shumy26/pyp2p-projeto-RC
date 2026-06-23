@@ -1,7 +1,10 @@
 import asyncio
 import json
+import logging
 import time
 import project_config as cfg
+
+logger = logging.getLogger(__name__)
 
 # In this code, if a return statement is "None", then it is either an error that occurred or
 # an invalid parameter that was verified before an error would occur.
@@ -40,8 +43,9 @@ def define_rdv_protocol(action_type:str, namespace=None, name=None, port=None, t
             protocol_field["port"] = int(port)
             # This defines that 'ttl' will only will be written to the protocol if it is a valid number
             if isinstance(ttl,(int,float)):
-                protocol_field["ttl"] = ttl
-            
+                # The absolute value prevents negative numbers
+                protocol_field["ttl"] = abs(ttl)
+                
             return protocol_field
         
         elif action_type == 'DISCOVER':
@@ -64,13 +68,11 @@ def define_rdv_protocol(action_type:str, namespace=None, name=None, port=None, t
             return protocol_field
         
         else:
-            print("There is no such action available to communicate with the rendevouz. (Maybe you misspelled it?)")
+            logger.warning("There is no such action available to communicate with the rendevouz. (Maybe you misspelled it?)")
             return None
 
     except TypeError:
-        print("Some argument is of the incorrect type.")
-        return None
-    else:
+        logger.error("Some argument is of the incorrect type.")
         return None
 
 # Registers the user in the network, using the Rendevouz IP address.
@@ -88,10 +90,10 @@ async def register():
     # Verifies if it is a valid address and port value
     if not (isinstance(connIP, str) and isinstance(connPort,int)):
         if connPort < 1 and connPort > 65535:
-            print("The port chosen for the rendevouz is out of range. It must be between 1 and 65535.")
+            logger.error("The port chosen for the rendevouz is out of range. It must be between 1 and 65535.")
             return None
         else:
-            print("The IP address of the rendevouz must be a string.")
+            logger.error("The IP address of the rendevouz must be a string.")
             return None
     
     # Defines the variables used in the protocol
@@ -115,17 +117,17 @@ async def register():
         if response_dict["status"] == "ERROR":
             match response_dict["message"]:
                 case "bad_name":
-                    print("The name is invalid. It must be a string between 1 and 64 characters.")
+                    logger.error("The name is invalid. It must be a string between 1 and 64 characters.")
                     return None
                 case "bad_namespace":
-                    print("The namespace is invalid. It must be a string between 1 and 64 characters.")
+                    logger.error("The namespace is invalid. It must be a string between 1 and 64 characters.")
                     return None
                 # TTL treated on function define_rdv_protocol()
                 case "bad_port":
-                    print("The port must be an integer between 1 and 65535.")
+                    logger.error("The port must be an integer between 1 and 65535.")
                     return None
         else:
-            print("You have been registered in the network.")
+            logger.info("You have been registered in the network.")
         
         # Close the connection and returns the response of the server/rendevouz
         writer.close()
@@ -134,19 +136,19 @@ async def register():
     
     # Raised when the server refuses the connection
     except ConnectionRefusedError:
-        print("The server refused to connect.")
+        logger.error("The server refused to connect.")
         return None
     # Raised when the socket could not connect to the IP address in a given time
     except TimeoutError:
-        print("Could not connect to server due to timed out attempt.")
+        logger.error("Could not connect to server due to timed out attempt.")
         return None
     # Raised when there are possibly no routes to that server
     except OSError:
-        print("There was a network issue and it was not possible to connect to the server.")
+        logger.error("There was a network issue and it was not possible to connect to the server.")
         return None
     # Raised when the user or the program interrupts the execution with a signal
     except (InterruptedError, KeyboardInterrupt):
-        print("The program was interrupted by a signal (like Ctrl+C).")
+        logger.error("The program was interrupted by a signal (like Ctrl+C).")
         return None
 
 async def discover(namespace=None):
@@ -157,10 +159,10 @@ async def discover(namespace=None):
     
     if not (isinstance(connIP, str) and isinstance(connPort,int)):
         if connPort < 1 and connPort > 65535:
-            print("The port chosen for the rendevouz is out of range. It must be between 1 and 65535.")
+            logger.error("The port chosen for the rendevouz is out of range. It must be between 1 and 65535.")
             return None
         else:
-            print("The IP address of the rendevouz must be a string.")
+            logger.error("The IP address of the rendevouz must be a string.")
             return None
     
     try:
@@ -177,14 +179,14 @@ async def discover(namespace=None):
         if response_dict["status"] == "ERROR":
             match response_dict["message"]:
                 case "peer_not_registered":
-                    print("You are not registered in the network!")
+                    logger.error("You are not registered in the network!")
                     return {}
                 case "bad_namespace":
-                    print("The namespace is invalid. It must be a string between 1 and 64 characters.")
+                    logger.error("The namespace is invalid. It must be a string between 1 and 64 characters.")
                     return None
                 
         elif (response_dict["status"] == "OK" and len(response_dict["peers"]) == 0):
-            print("There is no peer with the namespace that you entered.")
+            logger.warning("There is no peer with the namespace that you entered.")
             return None
 
         writer.close()
@@ -192,16 +194,16 @@ async def discover(namespace=None):
         return response_dict
     
     except ConnectionRefusedError:
-        print("The server refused to connect.")
+        logger.error("The server refused to connect.")
         return None
     except TimeoutError:
-        print("Could not connect to server due to timed out attempt.")
+        logger.error("Could not connect to server due to timed out attempt.")
         return None
     except OSError:
-        print("There was a network issue and it was not possible to connect to the server.")
+        logger.error("There was a network issue and it was not possible to connect to the server.")
         return None
     except TypeError:
-        print("A type error occurred when a parameter was passed to a function.")
+        logger.error("A type error occurred when a parameter was passed to a function.")
         try:
             writer.close()
             await writer.wait_closed()
@@ -209,7 +211,7 @@ async def discover(namespace=None):
         except:
             return None  
     except (InterruptedError, KeyboardInterrupt):
-        print("The program was interrupted by a signal (like Ctrl+C).")
+        logger.error("The program was interrupted by a signal (like Ctrl+C).")
         try:
             writer.close()
             await writer.wait_closed()
@@ -225,10 +227,10 @@ async def unregister():
     
     if not (isinstance(connIP, str) and isinstance(connPort,int)):
         if connPort < 1 and connPort > 65535:
-            print("The port chosen for the rendevouz is out of range. It must be between 1 and 65535.")
+            logger.error("The port chosen for the rendevouz is out of range. It must be between 1 and 65535.")
             return None
         else:
-            print("The IP address of the rendevouz must be a string.")
+            logger.error("The IP address of the rendevouz must be a string.")
             return None
     
     namespace, name, port = (config_dict.get("namespace"), config_dict.get("name"), config_dict.get("port"))
@@ -246,32 +248,32 @@ async def unregister():
         if response_dict["status"] == "ERROR":
             match response_dict["message"]:
                 case "bad_name":
-                    print("The name is invalid. It must be a string between 1 and 64 characters.")
+                    logger.error("The name is invalid. It must be a string between 1 and 64 characters.")
                     return None
                 case "bad_namespace":
-                    print("The namespace is invalid. It must be a string between 1 and 64 characters.")
+                    logger.error("The namespace is invalid. It must be a string between 1 and 64 characters.")
                     return None
                 case "bad_port":
-                    print("The port must be an integer between 1 and 65535.")
+                    logger.error("The port must be an integer between 1 and 65535.")
                     return None
         else:
-            print("You have been successfully unregistered.")
+            logger.info("You have been successfully unregistered.")
         
         writer.close()
         await writer.wait_closed()
         return response_dict
     
     except ConnectionRefusedError:
-        print("The server refused to connect.")
+        logger.error("The server refused to connect.")
         return None
     except TimeoutError:
-        print("Could not connect to server due to timed out attempt.")
+        logger.error("Could not connect to server due to timed out attempt.")
         return None
     except OSError:
-        print("There was a network issue and it was not possible to connect to the server.")
+        logger.error("There was a network issue and it was not possible to connect to the server.")
         return None
     except (InterruptedError, KeyboardInterrupt):
-        print("The program was interrupted by a signal (like Ctrl+C).")
+        logger.error("The program was interrupted by a signal (like Ctrl+C).")
         return None
 
 if __name__ == '__main__':
