@@ -38,6 +38,9 @@ def write_config():
         os.chdir(cwd)
         file_path = pathlib.Path("config.json")
         file_path.touch(exist_ok=True)
+
+        if os.path.getsize(file_path) != 0:
+            raise FileExistsError
         
         config_dict = {}
         
@@ -57,6 +60,9 @@ def write_config():
         
         with open("config.json", "w") as config_file:
             json.dump(config_dict, config_file, indent=4, ensure_ascii=False)
+            
+    except FileExistsError:
+        logger.debug("The config file already exists. So it was not created")
 
     except:
         logger.error("Something went wrong when trying to write to 'config.json'.")
@@ -65,6 +71,7 @@ def write_config():
 
 def change_config(rdv_name=None, rdv_port=None, name=None, port=None, namespace=None, ttl=None, max_reconnect_attempts=None, keep_alive_interval=None, features=None):
     try:
+        logger.debug("Trying to change the config file...")
         # Returns a dictionary that contains the local variables scope
         changes = locals().copy()
         
@@ -126,4 +133,3 @@ if __name__ == "__main__":
     
     change_config(namespace="CIC")
     print(getConfig())
-   

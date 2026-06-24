@@ -12,11 +12,11 @@ import rendevouz_connection as rdv
 async def loop_register():
     # Defines the ttl
     ttl = cfg.getConfig().get("ttl")
-    ttl = 7200 if (ttl == None) else ttl
+    ttl = 7200 if (ttl == None) else abs(ttl)
     try:
         while True:
             await rdv.register()
-            await asyncio.sleep(ttl - 5)
+            await asyncio.sleep(ttl - 0.5)
     except asyncio.CancelledError:
         return None
 

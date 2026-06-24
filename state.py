@@ -38,10 +38,5 @@ def state(discover_dict):
             json.dump(peers_list, peer_file, indent=4, ensure_ascii=False)
             return peers_list
     except:
-        logging.error("Something went wrong during the update of PeerTabel.json")
+        logging.error("Something went wrong during the update of PeerTable.json")
         return None
-    
-    
-                
-                
-        

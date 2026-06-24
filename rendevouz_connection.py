@@ -45,8 +45,6 @@ def define_rdv_protocol(action_type:str, namespace=None, name=None, port=None, t
             if isinstance(ttl,(int,float)):
                 # The absolute value prevents negative numbers
                 protocol_field["ttl"] = abs(ttl)
-                
-            return protocol_field
         
         elif action_type == 'DISCOVER':
             protocol_field["type"] = action_type
@@ -57,19 +55,19 @@ def define_rdv_protocol(action_type:str, namespace=None, name=None, port=None, t
                 namespace = str(namespace)
                 protocol_field["namespace"] = namespace
 
-            return protocol_field
-
         elif action_type == 'UNREGISTER':
             protocol_field["type"] = action_type
             protocol_field["namespace"] = str(namespace)
             protocol_field["name"] = str(name)
             protocol_field["port"] = int(port)
- 
-            return protocol_field
+            
         
         else:
             logger.warning("There is no such action available to communicate with the rendevouz. (Maybe you misspelled it?)")
             return None
+
+        logger.debug(f"Rendevouz protocol for {action_type} was made successfully.")
+        return protocol_field
 
     except TypeError:
         logger.error("Some argument is of the incorrect type.")
@@ -100,21 +98,27 @@ async def register():
     namespace, name, port, ttl = (config_dict.get("namespace"), config_dict.get("name"), config_dict.get("port"), config_dict.get("ttl"))
     try:
         # Connects to the server/rendevouz
+        logger.debug("Trying connection to rendevouz...")
         reader, writer = await asyncio.open_connection(connIP,connPort)
+        logger.debug("Connection established.")
         # Defines the protocol request to be sent
         register_dict = define_rdv_protocol('REGISTER', namespace, name, port, ttl)
         request_string = json.dumps(register_dict) + '\n'
         
         # Writes to buffer and send the request
         writer.write(request_string.encode())
+        logger.debug(f"Sending REGISTER request to {connIP}...")
         await writer.drain()
         
         # Wait until receives a response
+        logger.debug(f"Waiting for response from {connIP}...")
         response_string = await reader.read(32768)
+        logger.debug("The server responded successfully.")
         response_dict = json.loads(response_string.decode('utf-8'))
         
         # Verifies if the server returned an "ERROR status"
         if response_dict["status"] == "ERROR":
+            logger.debug("The server returned an ERROR.")
             match response_dict["message"]:
                 case "bad_name":
                     logger.error("The name is invalid. It must be a string between 1 and 64 characters.")
@@ -127,11 +131,14 @@ async def register():
                     logger.error("The port must be an integer between 1 and 65535.")
                     return None
         else:
+            logger.debug("The server returned OK.")
             logger.info("You have been registered in the network.")
         
         # Close the connection and returns the response of the server/rendevouz
+        logger.debug("Closing connection...")
         writer.close()
         await writer.wait_closed()
+        logger.debug("Connection closed.")
         return response_dict
     
     # Raised when the server refuses the connection
@@ -166,17 +173,23 @@ async def discover(namespace=None):
             return None
     
     try:
+        logger.debug("Trying connection to rendevouz...")
         reader, writer = await asyncio.open_connection(connIP,connPort)
+        logger.debug("Connection established.")
         discover_dict = define_rdv_protocol('DISCOVER',namespace)
         request_string = json.dumps(discover_dict) + '\n'
 
         writer.write(request_string.encode())
+        logger.debug(f"Sending DISCOVER request to {connIP}...")
         await writer.drain()
         
+        logger.debug(f"Waiting for response from {connIP}...")
         response_string = await reader.read(32768)
+        logger.debug("The server responded successfully.")
         response_dict = json.loads(response_string.decode('utf-8'))
         
         if response_dict["status"] == "ERROR":
+            logger.debug("The server returned an ERROR.")
             match response_dict["message"]:
                 case "peer_not_registered":
                     logger.error("You are not registered in the network!")
@@ -188,9 +201,13 @@ async def discover(namespace=None):
         elif (response_dict["status"] == "OK" and len(response_dict["peers"]) == 0):
             logger.warning("There is no peer with the namespace that you entered.")
             return None
-
+        
+        logger.debug("Closing connection...")
         writer.close()
         await writer.wait_closed()
+        logger.debug("Connection closed.")
+
+        logger.debug("The server returned the PeerList.")
         return response_dict
     
     except ConnectionRefusedError:
@@ -207,6 +224,8 @@ async def discover(namespace=None):
         try:
             writer.close()
             await writer.wait_closed()
+            logger.debug("Closing connection...")
+            logger.debug("Connection closed.")
             return None
         except:
             return None  
@@ -215,6 +234,8 @@ async def discover(namespace=None):
         try:
             writer.close()
             await writer.wait_closed()
+            logger.debug("Closing connection...")
+            logger.debug("Connection closed.")
             return None
         except:
             return None
@@ -235,17 +256,23 @@ async def unregister():
     
     namespace, name, port = (config_dict.get("namespace"), config_dict.get("name"), config_dict.get("port"))
     try:
+        logger.debug("Trying connection to rendevouz...")
         reader, writer = await asyncio.open_connection(connIP,connPort)
+        logger.debug("Connection established.")
         register_dict = define_rdv_protocol('UNREGISTER', namespace, name, port)
         request_string = json.dumps(register_dict) + '\n'
 
         writer.write(request_string.encode())
+        logger.debug(f"Sending UNREGISTER request to {connIP}...")
         await writer.drain()
         
+        logger.debug(f"Waiting for response from {connIP}...")
         response_string = await reader.read(32768)
+        logger.debug("The server responded successfully.")
         response_dict = json.loads(response_string.decode('utf-8'))
         
         if response_dict["status"] == "ERROR":
+            logger.debug("The server returned an ERROR.")
             match response_dict["message"]:
                 case "bad_name":
                     logger.error("The name is invalid. It must be a string between 1 and 64 characters.")
@@ -259,8 +286,10 @@ async def unregister():
         else:
             logger.info("You have been successfully unregistered.")
         
+        logger.debug("Closing connection...")
         writer.close()
         await writer.wait_closed()
+        logger.debug("Connection closed.")
         return response_dict
     
     except ConnectionRefusedError:
