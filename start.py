@@ -9,6 +9,7 @@ import rendevouz_connection as rdv
 import project_config as cfg
 import teste_parallelism2 as parallel
 import project_log as plog
+import hello
 
 plog.create_logs()
 
@@ -84,6 +85,8 @@ cfg.write_config()
 try:
     asyncio.run(parallel.main())
     asyncio.run(rdv.unregister())
+    asyncio.run(hello.shutdown_hello())
 except KeyboardInterrupt:
     asyncio.run(rdv.unregister())
+    asyncio.run(hello.shutdown_hello())
     print('Ctrl-C')
