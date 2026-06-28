@@ -59,7 +59,7 @@ class ColorLogFormatter(logging.Formatter):
         
         color = self.levels.get(record.levelno, '')
         
-        log_fmt = f"{color}{self.styles.get('BOLD',"")}[%(levelname)s]{self.styles.get('RESET',"")} {color}[%(asctime)s]{self.styles.get('RESET',"")} %(message)s{self.styles.get('RESET',"")}"
+        log_fmt = f"{color}{self.styles.get('BOLD',"")}[%(name)s]{self.styles.get('RESET',"")} {color}[%(asctime)s]{self.styles.get('RESET',"")} %(message)s{self.styles.get('RESET',"")}"
         
         formatter = logging.Formatter(log_fmt, datefmt="%a %d/%m/%Y %H:%M:%S")
         

@@ -5,14 +5,38 @@ import time
 import uuid
 from datetime import datetime, timezone
 
+from peer_table import *
 import project_config as cfg
 
-
-logger = logging.getLogger(__name__)
-
+logger = logging.getLogger("KeepAlive")
 
 def _timestamp_now():
     return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+
+def _local_peer_id():
+    config_dict = cfg.getConfig()
+    return f"{config_dict.get('name')}@{config_dict.get('namespace')}"
+
+def _peer_id_from_peer_table(peer:Peer):
+    if not isinstance(peer, Peer):
+        return None
+
+    name = peer.get("name") if isinstance(peer, Peer) else None
+    namespace = peer.get("namespace") if isinstance(peer, Peer) else None
+    if name and namespace:
+        return f"{name}@{namespace}"
+
+    return None
+
+def build_bye(src_id=None, dst_id=None,msg_id=None,reason="Closing session...",ttl=cfg.getConfig().get('ttl',1)):
+    return {
+        "type": "BYE",
+        "msg_id": (msg_id or uuid.uuid4()),
+        "src": src_id,
+        "dst": dst_id,
+        "reason": reason,
+        "ttl": ttl//ttl
+}
 
 
 def build_ping(msg_id=None, timestamp=None, ttl=1):
@@ -49,9 +73,9 @@ async def handle_keep_alive_message(payload, writer, peer_id=None):
     await writer.drain()
 
     if peer_id:
-        logger.info("PING recebido de %s; PONG enviado.", peer_id)
+        logger.debug("PING received from %s; PONG sent.", peer_id)
     else:
-        logger.info("PING recebido; PONG enviado.")
+        logger.debug("PING received; PONG sent.")
 
     return True
 
@@ -67,9 +91,9 @@ async def keep_alive_receiver(reader, writer, peer_id=None):
                 payload = json.loads(message.decode("utf-8"))
                 handled = await handle_keep_alive_message(payload, writer, peer_id=peer_id)
                 if not handled:
-                    logger.info("Mensagem nao relacionada a keep-alive: %s", payload)
+                    logger.info("Mensagem nao relacionada a keep_alive: %s", payload)
             except json.JSONDecodeError:
-                logger.warning("Mensagem invalida recebida no keep-alive.")
+                logger.warning("Mensagem invalida recebida no keep_alive.")
     except asyncio.CancelledError:
         return None
     finally:
@@ -79,67 +103,88 @@ async def keep_alive_receiver(reader, writer, peer_id=None):
 
     return None
 
+async def ping(peer:Peer, wait_time=cfg.getConfig().get('timeout'), msg_size=cfg.getConfig().get('msg_size',32768),attempts=cfg.getConfig().get('max_reconnect_attempts')):
 
-async def ping_once():
+    peer_id = _peer_id_from_peer_table(peer)
     config_dict = cfg.getConfig()
-    conn_ip = config_dict.get("rdv_name")
-    conn_port = config_dict.get("rdv_port")
     ttl = config_dict.get("keep_alive_ttl", 1)
-
-    if not isinstance(conn_ip, str) or not isinstance(conn_port, int):
-        logger.error("Invalid rendezvous connection settings for keep-alive.")
-        return None
+    reader, writer = peer.get('conn')
+    tries = 1
 
     try:
-        reader, writer = await asyncio.open_connection(conn_ip, conn_port)
-        ping_dict = build_ping(ttl=ttl)
-        request_string = json.dumps(ping_dict) + '\n'
+        async with peer.get('lock'):
+            ping_dict = build_ping(ttl=ttl)
+            request_string = json.dumps(ping_dict) + '\n'
 
-        print(f"Enviando PING: {json.dumps(ping_dict, ensure_ascii=False)}")
+            while tries < attempts:
+                logger.debug(f"Sending PING: {json.dumps(ping_dict, ensure_ascii=False)} (Attempt {tries}).")
 
-        started_at = time.perf_counter()
-        writer.write(request_string.encode())
-        await writer.drain()
+                started_at = time.perf_counter()
+                writer.write(request_string.encode())
+                await writer.drain()
+                
+                try:
+                    response_string = await asyncio.wait_for(reader.read(msg_size), wait_time)
+                
+                    response_string = response_string.decode().strip('\n')
+                    elapsed_ms = (time.perf_counter() - started_at) * 1000
+                    peer.set('rtt',elapsed_ms)
 
-        response_string = await reader.read(32768)
-        elapsed_ms = (time.perf_counter() - started_at) * 1000
+                    response_dict = json.loads(response_string)
+                    match response_dict.get('type'):
+                        case 'PONG':
+                            logger.debug(f"PING sent to {peer_id}, PONG received.")
+                            pass
+                        case _:
+                            logger.debug(f"The peer sent an invalid response to PING. Disconnecting from {peer_id}.")
+                            break
 
-        if not response_string:
-            logger.warning("PING sent but no PONG was received.")
-            writer.close()
-            await writer.wait_closed()
-            return None
+                    return True
 
-        response_dict = json.loads(response_string.decode('utf-8'))
+                except asyncio.TimeoutError:
+                    await asyncio.sleep(1)
+                    tries += 1
 
-        if response_dict.get("type") != "PONG":
-            logger.warning("Unexpected keep-alive response: %s", response_dict)
-        elif response_dict.get("msg_id") != ping_dict["msg_id"]:
-            logger.warning(
-                "PONG msg_id mismatch: expected %s, got %s",
-                ping_dict["msg_id"],
-                response_dict.get("msg_id"),
-            )
-        else:
-            logger.info("Keep-alive RTT: %.2f ms", elapsed_ms)
+        disconnected = await disconnect_peer(peer, writer=writer,reader=reader)
+        if disconnected:
+            return False
 
-        writer.close()
-        await writer.wait_closed()
-        return response_dict
 
     except ConnectionRefusedError:
-        logger.error("The server refused the keep-alive connection.")
+        logger.debug("The peer refused the keep_alive connection.")
+        disconnected = await disconnect_peer(peer, writer=writer,reader=reader)
         return None
     except TimeoutError:
-        logger.error("Could not connect to server due to timed out attempt.")
+        logger.debug("Could not connect to peer due to timed out attempt.")
+        disconnected = await disconnect_peer(peer, writer=writer,reader=reader)
         return None
     except OSError:
-        logger.error("There was a network issue and it was not possible to connect to the server.")
+        logger.debug("There was a network issue and it was not possible to connect to the peer.")
+        disconnected = await disconnect_peer(peer, writer=writer,reader=reader)
         return None
     except (InterruptedError, KeyboardInterrupt):
-        logger.warning("The keep-alive loop was interrupted by a signal.")
+        logger.debug("The keep_alive loop was interrupted by a signal.")
         return None
     except json.JSONDecodeError:
-        logger.error("The server returned an invalid JSON response for keep-alive.")
+        logger.debug("The peer returned an invalid JSON response for keep_alive.")
+        disconnected = await disconnect_peer(peer, writer=writer,reader=reader)
         return None
 
+async def ping_loop(peer:Peer,interval=cfg.getConfig().get('keep_alive_interval')):
+    try:
+        while True:
+            await ping(peer)
+            await asyncio.sleep(interval)
+    except TypeError:
+        logger.debug("Probably, the 'keep_alive_interval' parameter in config file is configured wrong.")
+
+async def start_PingPong():
+    try:
+        async with peer_table_lock:
+            peers_not_connected = peer_table.get('nconn')
+    
+        async with asyncio.TaskGroup() as tg:
+            tasks = [tg.create_task(ping_loop(peer)) for peer in peers_not_connected if (peer.get('direction') != 'STALE')]
+        
+    except asyncio.CancelledError:
+        logger.debug(f"Task 'start_PingPong' closed.")

@@ -25,7 +25,7 @@ def build_hello(peer_id, version="1.0", features=None, ttl=1):
         "type": "HELLO",
         "peer_id": str(peer_id),
         "version": str(version),
-        "features": list(features),
+        "features": features,
         "ttl": ttl,
     }
 
@@ -37,7 +37,7 @@ def build_hello_ok(peer_id, version="1.0", features=None, ttl=1):
         "type": "HELLO_OK",
         "peer_id": str(peer_id),
         "version": str(version),
-        "features": list(features),
+        "features": features,
         "ttl": ttl,
     }
 
