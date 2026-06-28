@@ -4,7 +4,8 @@ import uuid
 import logging
 from datetime import datetime, timezone
 import project_config as cfg
-
+import peer_connection as pc
+import peer_table as pt
 
 name = cfg.getConfig().get('name')
 namespace = cfg.getConfig().get('namespace')
