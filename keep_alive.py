@@ -28,7 +28,7 @@ async def disconnect_peer(peer:Peer, writer:asyncio.StreamWriter, reader:asyncio
                 response_dict = json.loads(response.decode())
                 if response_dict.get('type') == 'BYE_OK':
                     pass
-            except asyncio.TimeoutError, json.JSONDecodeError, AttributeError:
+            except (asyncio.TimeoutError, json.JSONDecodeError, AttributeError):
                 pass
 
             if not writer.is_closing():

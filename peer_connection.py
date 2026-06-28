@@ -48,7 +48,7 @@ async def disconnect_peer(peer:Peer, writer:asyncio.StreamWriter, reader:asyncio
                 response_dict = json.loads(response.decode())
                 if response_dict.get('type') == 'BYE_OK':
                     pass
-            except asyncio.TimeoutError, json.JSONDecodeError, AttributeError:
+            except (asyncio.TimeoutError, json.JSONDecodeError, AttributeError):
                 pass
 
             if not writer.is_closing():
@@ -140,7 +140,12 @@ async def peer_connection(peer:Peer):
     logger.debug("The code got here 2!")
     peer_id = _peer_id_from_peer_table(peer)
     logger.debug("The code got here 3!")
-    msg_size = cfg.getConfig().get('msg_size')
+    msg_size = cfg.getConfig().get('msg_size', 32768)
+    try:
+        if not isinstance(msg_size, int) or msg_size <= 0:
+            msg_size = 32768
+    except Exception:
+        msg_size = 32768
     host = peer.get('ip')
     port = peer.get('port')
 
