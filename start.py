@@ -5,11 +5,10 @@ import logging
 import logging.handlers
 import asyncio
 import os
-import rendevouz_connection as rdv
+import rendevouz_connection3 as rdv
 import project_config as cfg
 import teste_parallelism2 as parallel
 import project_log as plog
-import hello
 
 plog.create_logs()
 
@@ -73,9 +72,7 @@ console_handler.setFormatter(ColorLogFormatter())
 console_handler.setLevel(logging.INFO)
 logger.addHandler(console_handler)
 
-#logging.basicConfig(format='[%(levelname)s][%(asctime)s] %(message)s',datefmt='%a %d/%m/%Y %H:%M:%S', level=logging.DEBUG)
-
-file_handler = logging.handlers.RotatingFileHandler(filename=os.path.join('logs','p2p_app.log'),maxBytes=10*1024*1024,backupCount=5,encoding='utf-8',mode='a')
+file_handler = logging.handlers.RotatingFileHandler(filename=os.path.join('logs','p2p_app.log'),maxBytes=5*1024*1024,backupCount=5,encoding='utf-8',mode='a')
 file_handler.setLevel(logging.DEBUG)
 file_handler.setFormatter(logging.Formatter('[%(levelname)s][%(asctime)s] %(name)s.%(funcName)s: %(message)s',datefmt='%a %d/%m/%Y %H:%M:%S'))
 logger.addHandler(file_handler)
@@ -83,10 +80,19 @@ logger.addHandler(file_handler)
 cfg.write_config()
 
 try:
+    register_response = asyncio.run(rdv.register())
+    if register_response == None:
+        raise ConnectionError
+    else:
+        cfg.addConfig("ip",register_response["ip"])
+
+except ConnectionError:
+    # Create a terminate() function
+    pass
+
+try:
     asyncio.run(parallel.main())
     asyncio.run(rdv.unregister())
-    asyncio.run(hello.shutdown_hello())
 except KeyboardInterrupt:
     asyncio.run(rdv.unregister())
-    asyncio.run(hello.shutdown_hello())
     print('Ctrl-C')

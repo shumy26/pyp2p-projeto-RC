@@ -55,7 +55,7 @@ def write_config():
         config_dict["namespace"] = "UnB"
         # config_dict["ttl"] = 3600
         config_dict["msg_size"] = 32768 # 32 kB
-        config_dict["timeout"] = 5 # Time in seconds to receive an ACK and timout the PONG receive
+        config_dict["timeout"] = 5 # Time to seconds to receive an ACK
         config_dict["max_reconnect_attempts"] = 6
         config_dict["discover_interval"] = 5
         config_dict["keep_alive_interval"] = 30

@@ -4,6 +4,7 @@ import logging
 # import pathlib
 # import socket
 # import threading
+import traceback
 from datetime import datetime, timezone
 import uuid
 
@@ -14,7 +15,7 @@ logger = logging.getLogger('PeerConnector')
 
 async def terminate_peers():
     for peer in peer_table.get('conn'):
-        disconnected = await disconnect_peer(peer, *peer.get('conn'), peer_table=peer_table)
+        disconnected = await disconnect_peer(peer, *peer.get('conn'))
         if not disconnected:
             try:
                 writer = peer.get('conn')[1]
@@ -26,6 +27,40 @@ async def terminate_peers():
     
     peer_table.get('conn').clear()
     peer_table.get('nconn').clear()
+
+    return True
+
+async def disconnect_peer(peer:Peer, writer:asyncio.StreamWriter, reader:asyncio.StreamReader):
+
+    my_id = _local_peer_id()
+    peer_id = _peer_id_from_peer_table(peer)
+    msg_size = cfg.getConfig().get('msg_size',32768)
+    lock = peer.get('lock')
+    try:
+        bye_request = (json.dumps(build_bye(my_id, peer_id)) + '\n').encode()
+        
+        async with lock:
+            writer.write(bye_request)
+            await writer.drain()
+
+            try:
+                response = await asyncio.wait_for(reader.read(msg_size), timeout=cfg.getConfig().get('timeout',5))
+                response_dict = json.loads(response.decode())
+                if response_dict.get('type') == 'BYE_OK':
+                    pass
+            except asyncio.TimeoutError, json.JSONDecodeError, AttributeError:
+                pass
+
+            if not writer.is_closing():
+                writer.close()
+                await writer.wait_closed()
+            peer.set('rtt',-1)
+            peer.set('direction','STALE')
+            peer.set('conn', None)
+            peer_table.degrade(peer)
+        return True
+    except:
+        return False
 
 def _timestamp_now():
     return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
@@ -94,60 +129,39 @@ def build_bye_ok(src_id=None, dst_id=None,msg_id=None,ttl=cfg.getConfig().get('t
         "ttl": ttl//ttl
             }
 
-async def disconnect_peer(peer:Peer, writer:asyncio.StreamWriter, reader:asyncio.StreamReader):
-
-    my_id = _local_peer_id()
-    peer_id = _peer_id_from_peer_table(peer)
-    msg_size = cfg.getConfig().get('msg_size',32768)
-    lock = peer.get('lock')
-    try:
-        bye_request = json.dumps(build_bye(my_id, peer_id)).encode()
-        
-        async with lock:
-            writer.write(bye_request)
-            await writer.drain()
-
-            try:
-                response = await asyncio.wait_for(reader.read(msg_size), timeout=cfg.getConfig().get('timeout',5))
-                response_dict = json.loads(response.decode())
-                if response_dict.get('type') == 'BYE_OK':
-                    pass
-            except asyncio.TimeoutError, json.JSONDecodeError, AttributeError:
-                pass
-
-            if not writer.is_closing():
-                writer.close()
-                await writer.wait_closed()
-            peer.set('rtt',-1)
-            peer.set('direction','STALE')
-            peer.set('conn', None)
-            peer_table.degrade(peer)
-        return True
-    except:
-        return False
 
 async def peer_connection(peer:Peer):
     if not isinstance(peer,Peer):
         logger.debug("It seems a Peer object was not passed to this function.")
         return False
 
+    logger.debug("The code got here 1!")
     my_id = _local_peer_id()
+    logger.debug("The code got here 2!")
     peer_id = _peer_id_from_peer_table(peer)
-            
+    logger.debug("The code got here 3!")
+    msg_size = cfg.getConfig().get('msg_size')
+    host = peer.get('ip')
+    port = peer.get('port')
+
     try:
-        reader, writer = await asyncio.open_connection(peer.get('ip'), peer.get('port'))
+        logger.debug("Opening a connection..")
+        reader, writer = await asyncio.open_connection(host, port)
+        logger.debug(f"The code opened a connection to {peer_id} -> {host}:{port}!")
 
         hello_dict = build_hello(my_id)
-        hello_request = json.dumps(hello_dict)
+        hello_request = json.dumps(hello_dict) + '\n'
         hello_request = hello_request.encode()
 
         writer.write(hello_request)
         await writer.drain()
 
-        # Before: While True loop; Now: Each task will be handled separately.
+        response = await reader.read(msg_size)
 
-        response = await reader.read()
-        response_dict = json.loads(response)
+        if not response:
+            return False
+
+        response_dict = json.loads(response.decode().strip('\n'))
 
         match response_dict.get('type'):
 
@@ -164,6 +178,19 @@ async def peer_connection(peer:Peer):
                 logger.error(f"The peer {peer_id} answered HELLO with an invalid response.")
                 peer.decrease_attempts()
                 return False
+
+    # except* asyncio.CancelledError as eg:
+    #     # Mostra se o cancelamento veio com alguma mensagem explicando a causa
+    #     for exc in eg.exceptions:
+    #         logger.debug(f"Mensagem de cancelamento interna: {exc.args}. From: {peer_id}")
+        
+    #     tb_string = traceback.format_exc()
+    #     logger.debug("Cancelamento detectado no TaskGroup:\n%s From: %s", tb_string, peer_id)
+
+    # except* Exception as eg:
+    #     # ISSO VAI PEGAR A OUTRA TAREFA QUE QUEBROU E CANCELOU SUA CONEXÃO
+    #     logger.debug(f"ATENÇÃO: Outra tarefa falhou e causou o cancelamento geral! From: {peer_id}")
+    #     logger.debug(traceback.format_exc())
 
     # Raised when the peer refuses the connection
     except ConnectionRefusedError:
@@ -182,7 +209,7 @@ async def peer_connection(peer:Peer):
         logger.error(f"There was a network issue and it was not possible to connect to {peer_id} or the socket is already instantiated.")
         peer.decrease_attempts()
         return False
-
+    
     except json.JSONDecodeError:
         logger.error("The peer answered the request with an invalid JSON object.")
         peer.decrease_attempts()
@@ -210,6 +237,7 @@ async def peer_connection(peer:Peer):
 
 # This function handles attempts to connect to an outside host
 async def handle_outbound_connection(peer):
+    logger.debug("The code got here!")
     peer_id = _peer_id_from_peer_table(peer)
     connected = False
     # max_reconnect_attempts
@@ -219,6 +247,7 @@ async def handle_outbound_connection(peer):
     try:
         # Try to connect to peer for max_reconnect_attempts
         while n < max_n:
+            logger.debug("The code entered the loop!")
             connected = await peer_connection(peer)
             # If the peer is not connected, try again
             if not connected:
@@ -231,13 +260,18 @@ async def handle_outbound_connection(peer):
         if peer.get('attempts') == 0:
             logger.info(f"Multiple attempts were made to {peer_id}! Connection failed.")
             peer.set('direction','STALE')
-
+        
+        # Returns False if it fails forever, and True if it connects at least one time
+        return connected
+    
     except asyncio.CancelledError:
         logger.debug(f"The task handling the connection with {peer_id} was cancelled.")
-        raise asyncio.CancelledError
+        # raise asyncio.CancelledError
+        return False
 
     except:
         logger.debug(f"An error occured when trying to connect to {peer_id}.")
+        return False
 
 
 # This function handles attempts of a peer trying to connect to this device
@@ -303,14 +337,15 @@ async def handle_inbound_connection(reader:asyncio.StreamReader, writer:asyncio.
 
 async def start_inbound():
     '''Starts the server loop in order to connect to [Inbound] peers'''
-    host = 'localhost'
+    host = '0.0.0.0'
     port = cfg.getConfig().get('port')
     
-    if isinstance(port,NoneType):
+    if isinstance(port,type(None)):
         logger.debug("The port is not configured. Change it!")
         raise asyncio.CancelledError
 
     try:
+        logger.debug(f"Start listening to Inbound connections on port: {port}.")
         server = await asyncio.start_server(handle_inbound_connection,host,port)
         async with server:
             await server.serve_forever()
@@ -323,7 +358,7 @@ async def start_inbound():
 async def start_outbound():
     '''Starts the loop in order to connect to [Outbound] peers'''
     try:
-        discover_interval = cfg.getConfig().get('discover_interval')
+        discover_interval = cfg.getConfig().get('discover_interval',3)
         peers_not_connected = set()
         while True:
 
@@ -336,8 +371,8 @@ async def start_outbound():
                 logger.debug("There are no peers disconnected!")
                 await asyncio.sleep(discover_interval)
 
-            async with asyncio.TaskGroup() as tg:
-                tasks = [tg.create_task(handle_outbound_connection(peer)) for peer in peers_not_connected if peer.get('direction') != 'STALE']
+            tasks = [handle_outbound_connection(peer) for peer in peers_not_connected if peer.get('direction') != 'STALE']
+            results = await asyncio.gather(*tasks, return_exceptions=True) # The variable is just to hold the operations and not let python garbage collect them
             
             await asyncio.sleep(2 * discover_interval)
 

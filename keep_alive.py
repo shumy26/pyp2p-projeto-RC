@@ -10,6 +10,38 @@ import project_config as cfg
 
 logger = logging.getLogger("KeepAlive")
 
+async def disconnect_peer(peer:Peer, writer:asyncio.StreamWriter, reader:asyncio.StreamReader):
+
+    my_id = _local_peer_id()
+    peer_id = _peer_id_from_peer_table(peer)
+    msg_size = cfg.getConfig().get('msg_size',32768)
+    lock = peer.get('lock')
+    try:
+        bye_request = json.dumps(build_bye(my_id, peer_id)).encode()
+        
+        async with lock:
+            writer.write(bye_request)
+            await writer.drain()
+
+            try:
+                response = await asyncio.wait_for(reader.read(msg_size), timeout=cfg.getConfig().get('timeout',5))
+                response_dict = json.loads(response.decode())
+                if response_dict.get('type') == 'BYE_OK':
+                    pass
+            except asyncio.TimeoutError, json.JSONDecodeError, AttributeError:
+                pass
+
+            if not writer.is_closing():
+                writer.close()
+                await writer.wait_closed()
+            peer.set('rtt',-1)
+            peer.set('direction','STALE')
+            peer.set('conn', None)
+            peer_table.degrade(peer)
+        return True
+    except:
+        return False
+
 def _timestamp_now():
     return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 
@@ -39,69 +71,23 @@ def build_bye(src_id=None, dst_id=None,msg_id=None,reason="Closing session...",t
 }
 
 
-def build_ping(msg_id=None, timestamp=None, ttl=1):
+def build_ping(msg_id=None, timestamp=None, ttl=cfg.getConfig().get('ttl',1)):
     return {
         "type": "PING",
         "msg_id": str(msg_id or uuid.uuid4()),
         "timestamp": timestamp or _timestamp_now(),
-        "ttl": ttl,
+        "ttl": ttl//ttl,
     }
 
 
-def build_pong(msg_id, timestamp, ttl=1):
+def build_pong(msg_id, timestamp, ttl=cfg.getConfig().get('ttl',1)):
     return {
         "type": "PONG",
         "msg_id": str(msg_id),
         "timestamp": timestamp,
-        "ttl": ttl,
+        "ttl": ttl//ttl,
     }
 
-
-async def handle_keep_alive_message(payload, writer, peer_id=None):
-    if not isinstance(payload, dict):
-        return False
-
-    if payload.get("type") != "PING":
-        return False
-
-    pong = build_pong(
-        msg_id=payload.get("msg_id"),
-        timestamp=payload.get("timestamp"),
-        ttl=payload.get("ttl", 1),
-    )
-    writer.write((json.dumps(pong) + "\n").encode())
-    await writer.drain()
-
-    if peer_id:
-        logger.debug("PING received from %s; PONG sent.", peer_id)
-    else:
-        logger.debug("PING received; PONG sent.")
-
-    return True
-
-
-async def keep_alive_receiver(reader, writer, peer_id=None):
-    try:
-        while not reader.at_eof():
-            message = await reader.readline()
-            if not message:
-                break
-
-            try:
-                payload = json.loads(message.decode("utf-8"))
-                handled = await handle_keep_alive_message(payload, writer, peer_id=peer_id)
-                if not handled:
-                    logger.info("Mensagem nao relacionada a keep_alive: %s", payload)
-            except json.JSONDecodeError:
-                logger.warning("Mensagem invalida recebida no keep_alive.")
-    except asyncio.CancelledError:
-        return None
-    finally:
-        if not writer.is_closing():
-            writer.close()
-            await writer.wait_closed()
-
-    return None
 
 async def ping(peer:Peer, wait_time=cfg.getConfig().get('timeout'), msg_size=cfg.getConfig().get('msg_size',32768),attempts=cfg.getConfig().get('max_reconnect_attempts')):
 
@@ -170,10 +156,13 @@ async def ping(peer:Peer, wait_time=cfg.getConfig().get('timeout'), msg_size=cfg
         disconnected = await disconnect_peer(peer, writer=writer,reader=reader)
         return None
 
-async def ping_loop(peer:Peer,interval=cfg.getConfig().get('keep_alive_interval')):
+async def ping_loop(peer:Peer,interval=1):
+    interval = cfg.getConfig().get("keep_alive_interval",30)
     try:
         while True:
+            logger.debug(f"The code entred in the ping_loop with {interval} seconds")
             await ping(peer)
+            logger.debug(f"The code tried to ping to {peer}.")
             await asyncio.sleep(interval)
     except TypeError:
         logger.debug("Probably, the 'keep_alive_interval' parameter in config file is configured wrong.")
@@ -181,10 +170,10 @@ async def ping_loop(peer:Peer,interval=cfg.getConfig().get('keep_alive_interval'
 async def start_PingPong():
     try:
         async with peer_table_lock:
-            peers_not_connected = peer_table.get('nconn')
-    
-        async with asyncio.TaskGroup() as tg:
-            tasks = [tg.create_task(ping_loop(peer)) for peer in peers_not_connected if (peer.get('direction') != 'STALE')]
+            peers_connected = peer_table.get('conn')
+
+        tasks = [ping_loop(peer) for peer in peers_connected if (peer.get('direction') != 'STALE')]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         
     except asyncio.CancelledError:
         logger.debug(f"Task 'start_PingPong' closed.")

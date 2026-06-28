@@ -34,7 +34,12 @@ def state(discover_dict):
     # Updates PeerTable verifying if the peers connected to the rendevouz changed
     union = peer_table.get('nconn').union(new_set) 
     diff = peer_table.get('nconn').difference(new_set)
-    peer_table.set(union.difference(diff), 'nconn')
+    new_set = union.difference(diff)
+
+    intersection = peer_table.get('conn').intersection(new_set)
+    new_set = new_set.difference(intersection)
+
+    peer_table.set(new_set, 'nconn')
 
     # Verifies if the PeerTable exists. If it doesn't, create it
     cwd = os.path.dirname(os.path.realpath(__file__))
