@@ -56,19 +56,13 @@ def _get_peer_streams(peer: pt.Peer | None):
 
 async def _send_data(writer: asyncio.StreamWriter, data):
     # Serialize the payload and send it over the peer stream as a newline-delimited JSON message.
-    try:
-        json_data = json.dumps(data).encode('utf-8') + b'\n'
-        if len(json_data) > max_msg_size:
-            logging.error(f"message size exceeds the limit of {max_msg_size} bytes.")
-            return False
-        writer.write(json_data)
-        await writer.drain()
-        return True
-    except Exception as e:
-        if not writer.is_closing():
-            writer.close()
-        logging.error(f"Error sending data: {e}")
+    json_data = json.dumps(data).encode('utf-8') + b'\n'
+    if len(json_data) > max_msg_size:
+        logging.error(f"message size exceeds the limit of {max_msg_size} bytes.")
         return False
+    writer.write(json_data)
+    await writer.drain()
+    return True
 
 
 async def _read_message(reader: asyncio.StreamReader):
@@ -88,11 +82,18 @@ async def _read_message(reader: asyncio.StreamReader):
 
 async def _send_to_peer(peer: pt.Peer, data: dict):
     # Send a prepared message payload to the peer using the stored connection.
-    _, writer = _get_peer_streams(peer)
-    if writer is None:
-        return False
-    return await _send_data(writer, data)
 
+    try:
+        _, writer = _get_peer_streams(peer)
+        if writer is None:
+            return False
+        return await _send_data(writer, data)
+    except OSError:
+        pt.peer_table.get('conn').discard(peer)
+        if not writer.is_closing():
+            writer.close()
+            await writer.wait_closed()
+        return False
 
 async def _wait_for_ack(peer: pt.Peer, message_id: str):
     # Wait for the peer to acknowledge a previously sent message.
