@@ -68,11 +68,13 @@ async def _send_data(writer: asyncio.StreamWriter, data):
 async def _read_message(reader: asyncio.StreamReader):
     # Read one message from the peer stream and decode it into a Python dictionary.
     try:
-        data = await asyncio.wait_for(reader.readuntil(b'\n'), timeout)
-        return json.loads(data.decode('utf-8').strip())
-    except asyncio.TimeoutError:
-        logging.error("Timeout waiting for acknowledgment.")
-        raise
+        data = await reader.readuntil(b'\n')
+
+        if not data:
+            return None
+        
+        return json.loads(data.decode('utf-8').strip('\n'))
+
     except asyncio.IncompleteReadError as exc:
         raise ConnectionError("Connection closed while reading message.") from exc
     except Exception as e:
@@ -101,11 +103,12 @@ async def _wait_for_ack(peer: pt.Peer, message_id: str):
     if reader is None:
         return False
     try:
-        ack_message = await _read_message(reader)
-        if ack_message.get("type") == "ACK" and ack_message.get("msg_id") == message_id:
-            return True
-        logging.error(f"Received invalid acknowledgment: {ack_message}")
-        return False
+        async with peer.get('lock'):
+            ack_message = asyncio.wait_for(_read_message(reader), timeout)
+            if ack_message.get("type") == "ACK" and ack_message.get("msg_id") == message_id:
+                return True
+            logging.error(f"Received invalid acknowledgment: {ack_message}")
+            return False
     except (asyncio.TimeoutError, ConnectionError) as e:
         logging.error(f"Error waiting for acknowledgment: {e}")
         return False
