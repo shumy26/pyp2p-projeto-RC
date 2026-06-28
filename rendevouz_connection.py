@@ -4,7 +4,7 @@ import logging
 import time
 import project_config as cfg
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("RendevouzConnection")
 
 # In this code, if a return statement is "None", then it is either an error that occurred or
 # an invalid parameter that was verified before an error would occur.
@@ -119,7 +119,8 @@ async def register():
         # Verifies if the server returned an "ERROR status"
         if response_dict["status"] == "ERROR":
             logger.debug("The server returned an ERROR.")
-            match response_dict["message"]:
+            message = response_dict.get("message",'')
+            match message:
                 case "bad_name":
                     logger.error("The name is invalid. It must be a string between 1 and 64 characters.")
                     return None
@@ -129,6 +130,12 @@ async def register():
                 # TTL treated on function define_rdv_protocol()
                 case "bad_port":
                     logger.error("The port must be an integer between 1 and 65535.")
+                    return None
+                case "":
+                    logger.error("The rendevouz didn't respond correctly.")
+                    return None
+                case _:
+                    logger.error(f"From the rendevouz: {message}.")
                     return None
         else:
             logger.debug("The server returned OK.")
@@ -190,12 +197,19 @@ async def discover(namespace=None):
         
         if response_dict["status"] == "ERROR":
             logger.debug("The server returned an ERROR.")
-            match response_dict["message"]:
+            message = response_dict.get("message","")
+            match message:
                 case "peer_not_registered":
                     logger.error("You are not registered in the network!")
                     return {}
                 case "bad_namespace":
                     logger.error("The namespace is invalid. It must be a string between 1 and 64 characters.")
+                    return None
+                case "":
+                    logger.error("The rendevouz didn't respond correctly.")
+                    return None
+                case _:
+                    logger.error(f"From the rendevouz: {message}.")
                     return None
                 
         elif (response_dict["status"] == "OK" and len(response_dict["peers"]) == 0):
@@ -273,7 +287,8 @@ async def unregister():
         
         if response_dict["status"] == "ERROR":
             logger.debug("The server returned an ERROR.")
-            match response_dict["message"]:
+            message = response_dict.get("message",'')
+            match message:
                 case "bad_name":
                     logger.error("The name is invalid. It must be a string between 1 and 64 characters.")
                     return None
@@ -282,6 +297,12 @@ async def unregister():
                     return None
                 case "bad_port":
                     logger.error("The port must be an integer between 1 and 65535.")
+                    return None
+                case "":
+                    logger.error("The rendevouz didn't respond correctly.")
+                    return None
+                case _:
+                    logger.error(f"From the rendevouz: {message}.")
                     return None
         else:
             logger.info("You have been successfully unregistered.")

@@ -53,12 +53,13 @@ def write_config():
                 config_dict["port"] = port
                 break
         config_dict["namespace"] = "UnB"
-        config_dict["ttl"] = 7200
-        config_dict["msg_size"] = 32768
-        config_dict["timeout"] = 5
-        config_dict["max_reconnect_attempts"] = 10
+        config_dict["msg_size"] = 32768 # 32 kB
+        config_dict["timeout"] = 5 # Time to seconds to receive an ACK
+        config_dict["max_reconnect_attempts"] = 6
+        # config_dict["ttl"] = 3600
+        config_dict["discover_interval"] = 5
         config_dict["keep_alive_interval"] = 30
-        config_dict["features"] = ["ack", "metrics"]
+        config_dict["features"] = ["ack"]
         
         with open("config.json", "w") as config_file:
             json.dump(config_dict, config_file, indent=4, ensure_ascii=False)
@@ -71,7 +72,7 @@ def write_config():
 
 # This function changes the config file. It returns the old configuration if succeeded; otherwise, None.
 
-def change_config(rdv_name=None, rdv_port=None, name=None, port=None, namespace=None, ttl=None, max_reconnect_attempts=None, keep_alive_interval=None, features=None):
+def change_config(rdv_name=None, rdv_port=None, name=None, port=None, namespace=None, msg_size=None, timeout=None, ttl=None, max_reconnect_attempts=None, discover_interval=None, keep_alive_interval=None, features=None, **kwargs):
     try:
         logger.debug("Trying to change the config file...")
         # Returns a dictionary that contains the local variables scope
@@ -90,17 +91,22 @@ def change_config(rdv_name=None, rdv_port=None, name=None, port=None, namespace=
         # Updates the current info to updated info
         n = 0
         for key, value in changes.items():
-            if value != None:
+            if value != None and not isinstance(value,dict):
                 n += 1
                 config_dict[key] = value
+            if isinstance(value,dict) and (len(value) != 0):
+                n += 1
+                config_dict.update(value)
+
         if n == 0:
-            logger.info("There were no changes to be made.")
+            logger.debug("There were no changes to be made.")
             return None
 
         # Updates config file
         with open(file_path, "w") as config_file:            
             json.dump(config_dict, config_file, indent=4, ensure_ascii=False)
 
+        logger.debug(f"Changed the config file successfully.")
         return old_config_dict
     except:
         logger.error("Something went wrong when changing the config file.")
@@ -123,6 +129,19 @@ def getConfig():
     except:
         logger.error("Something went wrong when trying to reach 'config.json'.")
         return {}
+
+# This function adds a new configuration to the config file
+# If an exception is raised, it returns an empty dict
+
+def addConfig(new_config, new_value):
+    try:
+        current_config = getConfig()
+        current_config.setdefault(new_config, new_value)
+        change_config(**current_config)
+        logger.debug(f"Added new config -> ({new_config}:{new_value}).")
+    except:
+        logger.error(f"An error occurred when trying to update the config file with a new pair: ({new_config}:{new_value}).")
+        return {}
     
 if __name__ == "__main__":
     write_config()
@@ -133,5 +152,10 @@ if __name__ == "__main__":
     print(getConfig())
     print('\n')
     
-    change_config(namespace="CIC")
+    addConfig("ip",'172.0.0.1')
     print(getConfig())
+
+    # change_config(namespace="CIC")
+    # print(getConfig())
+   
+    

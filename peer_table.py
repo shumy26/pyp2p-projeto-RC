@@ -14,7 +14,7 @@ class Peer():
         # Can be 'Inbound', 'Outbound','' and 'STALE'. If it is '', it means it is not connected and it is the first time it is appearing. If it is 'STALE', it is not connected, but the host has already tried 'max_reconnect_attempts' times.
         self.__direction = ''
         self.__attempts = cfg.getConfig().get('max_reconnect_attempts',6)
-        self.__connection:tuple[asyncio.StreamReader, asyncio.StreamWriter] | None
+        self.__connection = None
         self.__lock = asyncio.Lock()
         self.__rtt = -1
 
@@ -43,7 +43,7 @@ class Peer():
                     raise AttributeError
 
         except AttributeError:
-            logger.debug(f"A wrong attribute was passed to the method 'get' of {self}.")
+            logger.debug(f"A wrong attribute was passed to the method 'get' of {self}. Attribute: {attribute}.")
             return None
         
     def set(self,attribute:str,new_value):
@@ -167,22 +167,26 @@ class PeerTable():
 peer_table = PeerTable()
 peer_table_lock = asyncio.Lock()
 
-# if __name__ == '__main__':
-#     table = PeerTable()
-#     for i in range(10):
-#         peer = Peer(IP=f'{i}', PORT=i)
-#         table.get('nconn').add(peer)
+if __name__ == '__main__':
+    peer1 = Peer(IP=cfg.getConfig().get('ip'),PORT=cfg.getConfig().get('port'))
+    print(peer1.get('ip'), peer1.get('port'))
+    print(peer1.get('lock'), peer1.get('name'), peer1.get('namespace'))
+    pass
+    # table = PeerTable()
+    # for i in range(10):
+    #     peer = Peer(IP=f'{i}', PORT=i)
+    #     table.get('nconn').add(peer)
 
-#     not_connected = table.get('nconn')
-#     for peer in not_connected:
-#         if peer.get('ip') == '3':
-#             peer.set('direction','STALE')
-#             break
+    # not_connected = table.get('nconn')
+    # for peer in not_connected:
+    #     if peer.get('ip') == '3':
+    #         peer.set('direction','STALE')
+    #         break
     
-#     print(table.get('nconn'), len(table.get('nconn')))
-#     peer = table.get('nconn').pop()
-#     print(table.get('nconn').discard(peer))
-#     print(table.get('nconn'), len(table.get('nconn')))
+    # print(table.get('nconn'), len(table.get('nconn')))
+    # peer = table.get('nconn').pop()
+    # print(table.get('nconn').discard(peer))
+    # print(table.get('nconn'), len(table.get('nconn')))
 
-#     for peer in not_connected:
-#         print(peer.get('ip'),peer.get('dir'))
+    # for peer in not_connected:
+    #     print(peer.get('ip'),peer.get('dir'))
