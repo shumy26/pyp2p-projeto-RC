@@ -8,6 +8,7 @@ import os
 import rendevouz_connection as rdv
 import project_config as cfg
 import teste_parallelism2 as parallel
+import cli
 import project_log as plog
 
 plog.create_logs()
@@ -85,19 +86,12 @@ logger.addHandler(file_handler)
 cfg.write_config()
 
 try:
-    register_response = asyncio.run(rdv.register())
-    if register_response == None:
-        raise ConnectionError
-    else:
-        cfg.addConfig("ip",register_response["ip"])
-
-except ConnectionError:
-    # Create a terminate() function
-    pass
-
-try:
-    asyncio.run(parallel.main())
+    # `cli.main()` already runs the asyncio loop internally; call it directly.
+    cli.main()
     asyncio.run(rdv.unregister())
 except KeyboardInterrupt:
-    asyncio.run(rdv.unregister())
+    try:
+        asyncio.run(rdv.unregister())
+    except Exception:
+        pass
     print('Ctrl-C')
