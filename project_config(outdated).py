@@ -2,8 +2,10 @@ import json
 import getpass
 import pathlib
 import socket
-# import sys
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 # -----------------------------
 
@@ -36,6 +38,9 @@ def write_config():
         os.chdir(cwd)
         file_path = pathlib.Path("config.json")
         file_path.touch(exist_ok=True)
+
+        if os.path.getsize(file_path) != 0:
+            raise FileExistsError
         
         config_dict = {}
         
@@ -57,14 +62,18 @@ def write_config():
         
         with open("config.json", "w") as config_file:
             json.dump(config_dict, config_file, indent=4, ensure_ascii=False)
+            
+    except FileExistsError:
+        logger.debug("The config file already exists. So it was not created")
 
     except:
-        print("Something went wrong when trying to write to 'config.json'.")
+        logger.error("Something went wrong when trying to write to 'config.json'.")
 
 # This function changes the config file. It returns the old configuration if succeeded; otherwise, None.
 
 def change_config(rdv_name=None, rdv_port=None, name=None, port=None, namespace=None, ttl=None, max_reconnect_attempts=None, keep_alive_interval=None, features=None):
     try:
+        logger.debug("Trying to change the config file...")
         # Returns a dictionary that contains the local variables scope
         changes = locals().copy()
         
@@ -85,7 +94,7 @@ def change_config(rdv_name=None, rdv_port=None, name=None, port=None, namespace=
                 n += 1
                 config_dict[key] = value
         if n == 0:
-            print("There were no changes to be made.")
+            logger.info("There were no changes to be made.")
             return None
 
         # Updates config file
@@ -94,7 +103,7 @@ def change_config(rdv_name=None, rdv_port=None, name=None, port=None, namespace=
 
         return old_config_dict
     except:
-        print("Something went wrong when changing the config file.")
+        logger.error("Something went wrong when changing the config file.")
         return None
 
 # This function reads the config file and returns a dict like object with its {options:values}.
@@ -112,7 +121,7 @@ def getConfig():
         
         return config_dict
     except:
-        print("Something went wrong when trying to reach 'config.json'.")
+        logger.error("Something went wrong when trying to reach 'config.json'.")
         return {}
     
 if __name__ == "__main__":
@@ -126,5 +135,3 @@ if __name__ == "__main__":
     
     change_config(namespace="CIC")
     print(getConfig())
-   
-    
