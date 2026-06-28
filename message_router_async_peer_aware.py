@@ -7,27 +7,17 @@ from datetime import datetime, timezone
 import project_config as cfg
 import peer_table as pt
 
-name = cfg.getConfig().get('name', '')
-namespace = cfg.getConfig().get('namespace', '')
-
-if cfg.getConfig().get("msg_size") is None or cfg.getConfig().get("msg_size") > 32768:
-    max_msg_size = 32768
-else:
-    max_msg_size = cfg.getConfig().get("msg_size")
-if cfg.getConfig().get("ttl") is None:
-    ttl = 1
-else:
-    ttl = cfg.getConfig().get("ttl")
-if cfg.getConfig().get("timeout") is None:
-    timeout = 5
-else:
-    timeout = cfg.getConfig().get("timeout")
-
 
 def _local_peer_id() -> str:
     # Build the current node identity in the form name@namespace.
+    name = cfg.getConfig().get('name', '')
+    namespace = cfg.getConfig().get('namespace', '')
     return f"{name}@{namespace}" if name and namespace else (name or namespace or "unknown")
 
+def _get_ttl() -> str:
+    if cfg.getConfig().get("ttl") is None:
+        return ttl = 1
+    return ttl = cfg.getConfig().get("ttl")
 
 def _peer_id(peer: pt.Peer | None) -> str | None:
     # Convert a Peer object to its network identifier for use in message headers.
@@ -57,6 +47,10 @@ def _get_peer_streams(peer: pt.Peer | None):
 async def _send_data(writer: asyncio.StreamWriter, data):
     # Serialize the payload and send it over the peer stream as a newline-delimited JSON message.
     json_data = json.dumps(data).encode('utf-8') + b'\n'
+    if cfg.getConfig().get("msg_size") is None or cfg.getConfig().get("msg_size") > 32768:
+    max_msg_size = 32768
+    else:
+    max_msg_size = cfg.getConfig().get("msg_size")
     if len(json_data) > max_msg_size:
         logging.error(f"message size exceeds the limit of {max_msg_size} bytes.")
         return False
@@ -104,6 +98,10 @@ async def _wait_for_ack(peer: pt.Peer, message_id: str):
         return False
     try:
         async with peer.get('lock'):
+            if cfg.getConfig().get("timeout") is None:
+                timeout = 5
+            else:
+            timeout = cfg.getConfig().get("timeout")
             ack_message = asyncio.wait_for(_read_message(reader), timeout)
             if ack_message.get("type") == "ACK" and ack_message.get("msg_id") == message_id:
                 return True
@@ -131,7 +129,7 @@ async def send_message(peer: pt.Peer, src: str, message: str):
         "dest": _peer_id(peer),
         "payload": message,
         "require_ack": True,
-        "ttl": ttl,
+        "ttl": _get_ttl(),
     }
     if not await _send_to_peer(peer, data):
         return False
@@ -148,7 +146,7 @@ async def send_ack(peer: pt.Peer, message_id: str):
         "type": "ACK",
         "msg_id": message_id,
         "timestamp": timestamp,
-        "ttl": ttl,
+        "ttl": _get_ttl(),
     }
     return await _send_to_peer(peer, ack_data)
 
@@ -176,7 +174,7 @@ async def publish_message(namespace: str, src: str, message: str):
         "dst": namespace or "*",
         "payload": message,
         "require_ack": False,
-        "ttl": ttl,
+        "ttl": _get_ttl(),
     }
 
     for peer in targets:
@@ -198,7 +196,7 @@ async def send_bye(peer: pt.Peer, src: str, reason: str):
         "src": src or _local_peer_id(),
         "dest": _peer_id(peer),
         "reason": reason,
-        "ttl": ttl,
+        "ttl": _get_ttl(),
     }
     return await _send_to_peer(peer, data)
 
@@ -214,7 +212,7 @@ async def send_bye_ok(peer: pt.Peer, src: str, msg_id_to_ack: str):
         "msg_id_to_ack": msg_id_to_ack,
         "src": src or _local_peer_id(),
         "dest": _peer_id(peer),
-        "ttl": ttl,
+        "ttl": _get_ttl(),
     }
     return await _send_to_peer(peer, data)
 
