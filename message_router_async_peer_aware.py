@@ -14,10 +14,10 @@ def _local_peer_id() -> str:
     namespace = cfg.getConfig().get('namespace', '')
     return f"{name}@{namespace}" if name and namespace else (name or namespace or "unknown")
 
-def _get_ttl() -> str:
+def _get_ttl() -> int:
     if cfg.getConfig().get("ttl") is None:
-        return ttl = 1
-    return ttl = cfg.getConfig().get("ttl")
+        return 1
+    return cfg.getConfig().get("ttl")
 
 def _peer_id(peer: pt.Peer | None) -> str | None:
     # Convert a Peer object to its network identifier for use in message headers.
