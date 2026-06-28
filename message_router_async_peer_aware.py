@@ -48,9 +48,9 @@ async def _send_data(writer: asyncio.StreamWriter, data):
     # Serialize the payload and send it over the peer stream as a newline-delimited JSON message.
     json_data = json.dumps(data).encode('utf-8') + b'\n'
     if cfg.getConfig().get("msg_size") is None or cfg.getConfig().get("msg_size") > 32768:
-    max_msg_size = 32768
+        max_msg_size = 32768
     else:
-    max_msg_size = cfg.getConfig().get("msg_size")
+        max_msg_size = cfg.getConfig().get("msg_size")
     if len(json_data) > max_msg_size:
         logging.error(f"message size exceeds the limit of {max_msg_size} bytes.")
         return False
@@ -101,7 +101,7 @@ async def _wait_for_ack(peer: pt.Peer, message_id: str):
             if cfg.getConfig().get("timeout") is None:
                 timeout = 5
             else:
-            timeout = cfg.getConfig().get("timeout")
+                timeout = cfg.getConfig().get("timeout")
             ack_message = asyncio.wait_for(_read_message(reader), timeout)
             if ack_message.get("type") == "ACK" and ack_message.get("msg_id") == message_id:
                 return True
