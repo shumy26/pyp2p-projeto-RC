@@ -45,33 +45,29 @@ async def exit_control():
     except:
         return None
 
-async def wait_for_state(interval = cfg.getConfig().get('discover_interval')):
+async def _wait_for_state(interval = cfg.getConfig().get('discover_interval')):
     await asyncio.sleep(interval)
     try:
         tasks = (pc.start_outbound(), pc.start_inbound())
         res = await asyncio.gather(*tasks,return_exceptions=True)
-        # async with asyncio.TaskGroup() as tg:
-        #     tg.create_task(pc.start_outbound())
-        #     tg.create_task(pc.start_inbound())
 
     except:
         return None
 
-async def wait_and_ping(interval = cfg.getConfig().get('discover_interval')):
+async def _wait_and_ping(interval = cfg.getConfig().get('discover_interval')):
     await asyncio.sleep(3*interval)
     try:
         res = await asyncio.gather(ka.start_PingPong(),return_exceptions=True)
-        # async with asyncio.TaskGroup() as tg:
-        #     tg.create_task(ka.start_PingPong())
     except:
         return None
+
 async def main():
     try:
         async with asyncio.TaskGroup() as tg:
             tg.create_task(loop_register())
             tg.create_task(loop_discover())
-            tg.create_task(wait_for_state())
-            tg.create_task(wait_and_ping())
+            tg.create_task(_wait_for_state())
+            tg.create_task(_wait_and_ping())
             tg.create_task(exit_control())
     except:
         return None

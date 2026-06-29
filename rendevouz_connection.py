@@ -82,16 +82,19 @@ async def register():
     # Get the configuration
     config_dict = cfg.getConfig()
     # Get the address and port to the server/rendevouz
-    connIP = config_dict["rdv_name"]
-    connPort = config_dict["rdv_port"]
+    connIP = config_dict.get("rdv_name")
+    connPort = config_dict.get("rdv_port")
     
     # Verifies if it is a valid address and port value
-    if not (isinstance(connIP, str) and isinstance(connPort,int)):
-        if connPort < 1 and connPort > 65535:
+    if not isinstance(connIP, str): 
+        logger.error("Change the config file: 'rdv_name' must be a string!")
+        return None
+    
+    if not isinstance(connPort,int):
+        logger.error("Change the config file: 'rdv_port' must be an integer!")
+    else:
+        if connPort < 1 or connPort > 65535:
             logger.error("The port chosen for the rendevouz is out of range. It must be between 1 and 65535.")
-            return None
-        else:
-            logger.error("The IP address of the rendevouz must be a string.")
             return None
     
     # Defines the variables used in the protocol
@@ -139,7 +142,7 @@ async def register():
                     return None
         else:
             logger.debug("The server returned OK.")
-            logger.info("You have been registered in the network.")
+            logger.debug("You have been registered in the network.")
         
         # Close the connection and returns the response of the server/rendevouz
         logger.debug("Closing connection...")
@@ -168,15 +171,18 @@ async def register():
 async def discover(namespace=None):
 
     config_dict = cfg.getConfig()
-    connIP = config_dict["rdv_name"]
-    connPort = config_dict["rdv_port"]
+    connIP = config_dict.get("rdv_name")
+    connPort = config_dict.get("rdv_port")
     
-    if not (isinstance(connIP, str) and isinstance(connPort,int)):
-        if connPort < 1 and connPort > 65535:
+    if not isinstance(connIP, str): 
+        logger.error("Change the config file: 'rdv_name' must be a string!")
+        return None
+    
+    if not isinstance(connPort,int):
+        logger.error("Change the config file: 'rdv_port' must be an integer!")
+    else:
+        if connPort < 1 or connPort > 65535:
             logger.error("The port chosen for the rendevouz is out of range. It must be between 1 and 65535.")
-            return None
-        else:
-            logger.error("The IP address of the rendevouz must be a string.")
             return None
     
     try:
@@ -257,16 +263,20 @@ async def discover(namespace=None):
 async def unregister():
     
     config_dict = cfg.getConfig()
-    connIP = config_dict["rdv_name"]
-    connPort = config_dict["rdv_port"]
+    connIP = config_dict.get("rdv_name")
+    connPort = config_dict.get("rdv_port")
     
-    if not (isinstance(connIP, str) and isinstance(connPort,int)):
-        if connPort < 1 and connPort > 65535:
+    if not isinstance(connIP, str): 
+        logger.error("Change the config file: 'rdv_name' must be a string!")
+        return None
+    
+    if not isinstance(connPort,int):
+        logger.error("Change the config file: 'rdv_port' must be an integer!")
+    else:
+        if connPort < 1 or connPort > 65535:
             logger.error("The port chosen for the rendevouz is out of range. It must be between 1 and 65535.")
             return None
-        else:
-            logger.error("The IP address of the rendevouz must be a string.")
-            return None
+    
     
     namespace, name, port = (config_dict.get("namespace"), config_dict.get("name"), config_dict.get("port"))
     try:

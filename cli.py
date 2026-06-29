@@ -9,7 +9,7 @@ import project_config as cfg
 import project_log as plog
 import rendevouz_connection as rdv
 import state
-import message_router_async_peer_aware as router
+import message_router as router
 import teste_parallelism2 as parallel
 
 

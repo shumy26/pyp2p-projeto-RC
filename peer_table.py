@@ -17,6 +17,7 @@ class Peer():
         self.__connection = None
         self.__lock = asyncio.Lock()
         self.__rtt = -1
+        self.__ack_future = None
 
     def get(self,attribute:str=''):
         try:
@@ -39,6 +40,8 @@ class Peer():
                     return self.__rtt
                 case 'lock':
                     return self.__lock
+                case 'ack':
+                    return self.__ack_future
                 case _:
                     raise AttributeError
 
@@ -73,6 +76,9 @@ class Peer():
                 case 'rtt':
                     self.__rtt = round(float(new_value),2)
                     return self.__rtt
+                case 'ack':
+                    self.__ack_future = new_value
+                    return self.__ack_future
                 case _:
                     raise AttributeError
 
