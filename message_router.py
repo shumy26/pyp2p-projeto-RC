@@ -157,30 +157,6 @@ async def _send_to_peer(peer: pt.Peer, data: dict):
             await writer.wait_closed()
         return False
 
-async def _wait_for_ack(peer: pt.Peer, message_id: str):
-    # Wait for the peer to acknowledge a previously sent message.
-    reader, _ = _get_peer_streams(peer)
-    if reader is None:
-        return False
-    try:
-        async with peer.get('lock'):
-            if cfg.getConfig().get("timeout") is None:
-                timeout = 5
-            else:
-                timeout = cfg.getConfig().get("timeout")
-            ack_message = asyncio.wait_for(_read_message(reader), timeout)
-            if ack_message.get("type") == "ACK" and ack_message.get("msg_id") == message_id:
-                return True
-            logging.error(f"Received invalid acknowledgment: {ack_message}")
-            return False
-    except (asyncio.TimeoutError, ConnectionError) as e:
-        logging.error(f"Error waiting for acknowledgment: {e}")
-        return False
-    except Exception as e:
-        logging.error(f"Error waiting for acknowledgment: {e}")
-        return False
-
-
 async def send_message(peer: pt.Peer, src: str, message: str):
     # Send a point-to-point message and expect an ACK from the peer.
     if not isinstance(peer, pt.Peer):
@@ -297,15 +273,18 @@ async def handle_incoming_message(peer: pt.Peer):
                 logging.info(f"Received SEND message from {message.get('src')}: {message.get('payload')}")
                 if message.get("require_ack"):
                     await send_ack(peer, message.get("msg_id"))
+
             elif msg_type == "ACK":
                 if peer.get('ack') and not peer.get('ack').done():
                         peer.get('ack').set_result(True)
 
             elif msg_type == "PUB":
                 logging.info(f"Received PUB message from {message.get('src')}: {message.get('payload')}")
+
             elif msg_type == "BYE":
                 logging.info(f"Received BYE message from {message.get('src')}. Reason: {message.get('reason')}")
                 await send_bye_ok(peer, _local_peer_id(), message.get("msg_id"))
+    
             elif msg_type == "BYE_OK":
                 logging.info(f"Received BYE_OK message from {message.get('src')} acknowledging BYE with msg_id: {message.get('msg_id')}")
             else:

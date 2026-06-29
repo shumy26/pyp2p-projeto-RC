@@ -130,7 +130,6 @@ async def handle_outbound_connection(peer):
     try:
         # Try to connect to peer for max_reconnect_attempts
         while n <= max_n:
-            logger.debug("The code entered the loop!")
             connected = await peer_connection(peer)
             # If the peer is not connected, try again
             if not connected and n < max_n:

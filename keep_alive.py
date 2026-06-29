@@ -55,7 +55,7 @@ async def ping(peer:Peer, wait_time=cfg.getConfig().get('timeout'), msg_size=cfg
                 
                     response_string = response_string.decode().strip('\n')
                     elapsed_ms = (time.perf_counter() - started_at) * 1000
-                    peer.set('rtt',elapsed_ms)
+                    peer.set('rtt',round(elapsed_ms,2))
 
                     response_dict = json.loads(response_string)
                     match response_dict.get('type'):

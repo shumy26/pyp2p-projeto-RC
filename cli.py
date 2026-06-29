@@ -11,31 +11,31 @@ import rendevouz_connection as rdv
 import state
 import message_router as router
 import teste_parallelism2 as parallel
+import p2p_client as p2p
 
+logger = logging.getLogger("CLI")
 
-HELP_TEXT = """Comandos disponíveis:
-/peers [* | #namespace]   Descobrir e listar peers
-/msg <peer_id> <mensagem> Enviar mensagem direta
-/pub * <mensagem>         Enviar broadcast global
-/pub #<namespace> <msg>   Enviar mensagem para todos do namespace
-/conn                     Mostrar conexões ativas (inbound/outbound)
-/rtt                      Exibir RTT médio por peer
-/reconnect                Forçar reconciliação de peers
-/log <Nível>              Ajustar nível de log (DEBUG, INFO...)
-/quit                     Encerrar aplicação
-"""
+HELP_TEXT = """
+╔════════════════════════════════════════════════════════════════╗
+║                P2Pchat — Comandos disponíveis                  ║
+╠════════════════════════════════════════════════════════════════╣
+║  /peers [* | #namespace]      Discover and List Peers          ║
+║  /msg <peer_id> <mensagem>    Send a direct message to a Peer  ║
+║  /pub * <mensagem>            Global Broadcast                 ║
+║  /pub #<namespace> <mensagem> Publish to Namespace             ║
+║  /conn                        List active connections          ║
+║  /rtt                         Average RTT per Peer             ║
+║  /reconnect                   Force reconciliation of Peers    ║
+║  /log <DEBUG|INFO|...>        Log level adjust                 ║
+║  /help                        Show this Help Message           ║
+║  /quit                        Quit the application             ║
+╚════════════════════════════════════════════════════════════════╝"""
 
 
 @dataclass
 class BackgroundService:
     task: asyncio.Task
     name: str
-
-
-def _local_peer_id() -> str:
-    config_dict = cfg.getConfig()
-    return f"{config_dict.get('name')}@{config_dict.get('namespace')}"
-
 
 def _configure_logging():
     plog.create_logs()
@@ -44,12 +44,11 @@ def _configure_logging():
     if not root_logger.handlers:
         logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
 
-
 def _show_help():
     print(HELP_TEXT)
 
 
-async def _ainput(prompt: str = "cli> "):
+async def _ainput(prompt: str = "p2p> "):
     return await asyncio.to_thread(input, prompt)
 
 
@@ -65,23 +64,35 @@ def _parse_namespace_token(token: str | None):
 
 def _peer_identity(peer) -> str:
     if not isinstance(peer, pt.Peer):
-        return "unknown"
+        return "Unknown"
     name = peer.get("name") or ""
     namespace = peer.get("namespace") or ""
     if name and namespace:
         return f"{name}@{namespace}"
-    return name or namespace or "unknown"
+    return name or namespace or "Unknown"
 
 
-async def _find_peer_by_id(peer_id: str):
+async def _find_peer_by_id(peer_id: str, state:str='both'):
     async with pt.peer_table_lock:
         connected = list(pt.peer_table.get("conn") or set())
         not_connected = list(pt.peer_table.get("nconn") or set())
 
-    for peer in connected + not_connected:
-        if _peer_identity(peer) == peer_id:
-            return peer
-    return None
+    match state:
+        case 'both':
+            for peer in connected + not_connected:
+                if _peer_identity(peer) == peer_id:
+                    return peer
+            return None
+        case 'conn':
+            for peer in connected:
+                if _peer_identity(peer) == peer_id:
+                    return peer
+            return None
+        case 'nconn':
+            for peer in not_connected:
+                if _peer_identity(peer) == peer_id:
+                    return peer
+            return None
 
 
 async def _ensure_connected(peer: pt.Peer):
@@ -91,37 +102,33 @@ async def _ensure_connected(peer: pt.Peer):
     if peer in (pt.peer_table.get("conn") or set()):
         return True
 
-    if peer in (pt.peer_table.get("nconn") or set()):
-        return await pc.peer_connection(peer)
-
     return False
 
 
 def _print_peers(discover_dict):
     if not discover_dict or not isinstance(discover_dict, dict):
-        print("Nenhum peer encontrado.")
+        print("No peer was found within the search.")
         return
 
     peers = discover_dict.get("peers") or []
     if not peers:
-        print("Nenhum peer encontrado.")
         return
 
     for peer in peers:
         peer_id = peer.get("peer_id") or f"{peer.get('name')}@{peer.get('namespace')}"
-        print(f"- {peer_id} | {peer.get('ip')}:{peer.get('port')} | ttl={peer.get('ttl')}")
+        print(f"• {peer_id} | {peer.get('ip')}:{peer.get('port')} | ttl = {peer.get('ttl')}")
 
 
 def _print_connections():
     peers = list(pt.peer_table.get("conn") or set())
     if not peers:
-        print("Nenhuma conexão ativa.")
+        print("No active connection.")
         return
 
     for peer in peers:
         peer_id = _peer_identity(peer)
         print(
-            f"- {peer_id} | {peer.get('direction')} | {peer.get('ip')}:{peer.get('port')} | RTT={peer.get('rtt')} ms"
+            f"• {peer_id} | {peer.get('direction')} | {peer.get('ip')}:{peer.get('port')} | RTT = {(peer.get('rtt') + 'ms') if peer.get('rtt') != -1 else "Not yet measured"}"
         )
 
 
@@ -130,7 +137,7 @@ def _print_rtt():
     valid_rtts = []
 
     if not peers:
-        print("Nenhuma conexão ativa.")
+        print("No active connection.")
         return
 
     for peer in peers:
@@ -138,61 +145,60 @@ def _print_rtt():
         peer_id = _peer_identity(peer)
         if isinstance(rtt, (int, float)) and rtt >= 0:
             valid_rtts.append(rtt)
-            print(f"- {peer_id}: {rtt:.2f} ms")
+            print(f"• {peer_id}: {rtt:.2f} ms")
         else:
-            print(f"- {peer_id}: sem RTT medido")
+            print(f"• {peer_id}: No RTT acquired")
 
     if valid_rtts:
         avg = sum(valid_rtts) / len(valid_rtts)
-        print(f"RTT médio: {avg:.2f} ms")
+        print(f"Average RTT: {avg:.2f} ms")
 
 
 async def _reconnect():
-    discover_dict = await rdv.discover()
-    state.state(discover_dict)
-    if discover_dict is None:
-        print("Reconciliação falhou: nenhum dado do rendezvous.")
-        return
+    try:
+        not_conn_peers = [pc.handle_outbound_connection(not_conn_peer) for not_conn_peer in pt.peer_table.get('nconn') if not_conn_peer.get('direction') != 'STALE']
 
-    peer_count = len(discover_dict.get("peers") or []) if isinstance(discover_dict, dict) else 0
-    print(f"Reconciliação concluída. Peers descobertos: {peer_count}")
+        if not not_conn_peers:
+            logger.debug("No one to reconciliate.")
+
+        connected = await asyncio.gather(*not_conn_peers)
+
+    except:
+        logger.error(f"An error occured when trying to reconciliate.")
+        return False
 
 
 async def _send_direct(peer_id: str, message: str):
-    peer = await _find_peer_by_id(peer_id)
+    peer = await _find_peer_by_id(peer_id,'conn')
     if peer is None:
-        print(f"Peer '{peer_id}' não encontrado na tabela local.")
-        return
+        print(f"Peer '{peer_id}' not connected.")
+        return False
 
-    if not await _ensure_connected(peer):
-        print(f"Não foi possível conectar em '{peer_id}'.")
-        return
-
-    ok = await router.send_message(peer, _local_peer_id(), message)
+    ok = await router.send_message(peer, router._local_peer_id(), message)
     if ok:
-        print(f"Mensagem enviada para {peer_id}.")
+        return True
     else:
-        print(f"Falha ao enviar mensagem para {peer_id}.")
+        return False
 
 
 async def _publish(namespace_token: str, message: str):
     namespace = _parse_namespace_token(namespace_token)
     if namespace is None:
-        print("Use /pub * <mensagem> ou /pub #<namespace> <mensagem>.")
+        print("Use /pub * <mensagem> or /pub #<namespace> <mensagem>.")
         return
 
-    ok = await router.publish_message(namespace, _local_peer_id(), message)
+    ok = await router.publish_message(namespace, router._local_peer_id(), message)
     if ok:
-        target = "todos os peers" if namespace == "*" else f"namespace {namespace}"
-        print(f"Mensagem publicada para {target}.")
+        target = "all peers" if namespace == "*" else f"namespace: #{namespace}"
+        print(f"Message published to {target}.")
     else:
-        print("Nenhum peer conectado para receber a publicação.")
+        print("No peer connected to receive the publish.")
 
 
 async def _list_peers(namespace_token: str | None):
     namespace = _parse_namespace_token(namespace_token)
     if namespace_token is not None and namespace is None:
-        print("Use /peers, /peers * ou /peers #<namespace>.")
+        print("Use /peers, /peers * or /peers #<namespace>.")
         return
 
     discover_dict = await rdv.discover(namespace if namespace != "*" else None)
@@ -212,35 +218,12 @@ async def _initial_bootstrap():
 
 async def _start_background_services():
     services = [
-        BackgroundService(asyncio.create_task(parallel.loop_register()), "register-loop"),
-        BackgroundService(asyncio.create_task(parallel.loop_discover()), "discover-loop"),
-        BackgroundService(asyncio.create_task(parallel.wait_for_state()), "state-reconcile"),
-        BackgroundService(asyncio.create_task(parallel.wait_and_ping()), "ping-loop"),
+        BackgroundService(asyncio.create_task(p2p.loop_register()), "register-loop"),
+        BackgroundService(asyncio.create_task(p2p.loop_discover()), "discover-loop"),
+        BackgroundService(asyncio.create_task(p2p._wait_for_state()), "state-reconcile"),
+        BackgroundService(asyncio.create_task(p2p._wait_and_ping()), "ping-loop"),
     ]
     return services
-
-
-async def _auto_connect_loop():
-    cfg_dict = cfg.getConfig()
-    interval = cfg_dict.get("discover_interval", 5)
-    while True:
-        try:
-            async with pt.peer_table_lock:
-                nconn = list(pt.peer_table.get("nconn") or set())
-                conn_set = set(pt.peer_table.get("conn") or set())
-
-            for peer in nconn:
-                if peer in conn_set:
-                    continue
-                try:
-                    asyncio.create_task(pc.peer_connection(peer))
-                except Exception as e:
-                    logging.getLogger().debug("auto-connect failed for %s: %s", _peer_identity(peer), e)
-
-        except Exception as e:
-            logging.getLogger().debug("auto-connect loop error: %s", e)
-
-        await asyncio.sleep(interval)
 
 
 async def _shutdown_background_services(services):
@@ -250,7 +233,7 @@ async def _shutdown_background_services(services):
     await asyncio.gather(*(service.task for service in services), return_exceptions=True)
 
     try:
-        await pc.terminate_peers()
+        await p2p.terminate_peers()
     except Exception:
         pass
 
@@ -265,7 +248,6 @@ async def repl():
     await _initial_bootstrap()
     services = await _start_background_services()
     # start auto-connect loop to attempt connections to all discovered peers
-    services.append(BackgroundService(asyncio.create_task(_auto_connect_loop()), "auto-connect"))
 
     print("REPL iniciado. Digite /help para ver os comandos.")
 
@@ -312,6 +294,7 @@ async def repl():
                 continue
 
             if raw == "/reconnect":
+                parts = shlex.split(raw)
                 await _reconnect()
                 continue
 
@@ -324,13 +307,13 @@ async def repl():
                 level_name = parts[1].upper()
                 level = getattr(logging, level_name, None)
                 if not isinstance(level, int):
-                    print("Nível inválido. Use DEBUG, INFO, WARNING, ERROR ou CRITICAL.")
+                    print("Invalid level. Use DEBUG, INFO, WARNING, ERROR ou CRITICAL.")
                     continue
 
                 logging.getLogger().setLevel(level)
                 for handler in logging.getLogger().handlers:
                     handler.setLevel(level)
-                print(f"Nível de log ajustado para {level_name}.")
+                print(f"Log level adjusted to: {level_name}.")
                 continue
 
             if raw == "/quit":

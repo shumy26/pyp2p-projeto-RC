@@ -6,7 +6,7 @@ import project_config as cfg
 import rendevouz_connection as rdv
 import peer_connection as pc
 import keep_alive as ka
-from message_router import _local_peer_id, _peer_id as _peer_id_from_peer_table, build_bye
+from message_router import _local_peer_id, _peer_id as _peer_id_from_peer_table, build_bye, handle_incoming_message
 from peer_table import *
 
 logger = logging.getLogger("P2PHandler")
@@ -127,6 +127,23 @@ async def _wait_and_ping():
                 pass
     except:
         return None
+
+async def new_connection(event:asyncio.Event):
+    if event.is_set():
+        return True
+    else:
+        return False
+
+async def all_peers_messages():
+    interval = cfg.getConfig().get('discover_interval',10)
+
+    while True:
+        await asyncio.sleep(3*interval)
+        try:
+            tasks = [handle_incoming_message(peer) for peer in peer_table.get('conn')]
+            result = asyncio.gather(*tasks)
+
+
 
 async def main():
     try:
