@@ -8,6 +8,7 @@ import peer_connection as pc
 import keep_alive as ka
 from message_router import _local_peer_id, _peer_id as _peer_id_from_peer_table, build_bye
 from peer_table import *
+
 logger = logging.getLogger("P2PHandler")
 
 # -------- Exit Functions ----------
@@ -98,7 +99,7 @@ async def exit_control():
                 for t in tasks:
                     t.cancel()
                 
-                terminated = await pc.terminate_peers()
+                terminated = await terminate_peers()
 
                 return None
     except:
@@ -114,10 +115,16 @@ async def _wait_for_state():
     except:
         return None
 
-async def _wait_and_ping(interval = cfg.getConfig().get('discover_interval')):
-    await asyncio.sleep(3*interval)
+async def _wait_and_ping():
+    interval = cfg.getConfig().get('discover_interval',10)
+    await asyncio.sleep(5*interval)  # Wait 5 loops to try to ping peers
     try:
-        res = await asyncio.gather(ka.start_PingPong(),return_exceptions=True)
+        while True:
+            try:
+                res = asyncio.run(ka.start_PingPong())
+            except asyncio.CancelledError:
+                logger.debug(f"Task 'start_PingPong' closed.")
+                pass
     except:
         return None
 

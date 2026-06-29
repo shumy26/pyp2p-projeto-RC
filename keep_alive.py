@@ -3,72 +3,13 @@ import json
 import logging
 import time
 import uuid
-from datetime import datetime, timezone
 
 from peer_table import *
 import project_config as cfg
+from p2p_client import disconnect_peer
+from message_router import _timestamp_now, _peer_id as _peer_id_from_peer_table
 
 logger = logging.getLogger("KeepAlive")
-
-async def disconnect_peer(peer:Peer, writer:asyncio.StreamWriter, reader:asyncio.StreamReader):
-
-    my_id = _local_peer_id()
-    peer_id = _peer_id_from_peer_table(peer)
-    msg_size = cfg.getConfig().get('msg_size',32768)
-    lock = peer.get('lock')
-    try:
-        bye_request = json.dumps(build_bye(my_id, peer_id)).encode()
-        
-        async with lock:
-            writer.write(bye_request)
-            await writer.drain()
-
-            try:
-                response = await asyncio.wait_for(reader.read(msg_size), timeout=cfg.getConfig().get('timeout',5))
-                response_dict = json.loads(response.decode())
-                if response_dict.get('type') == 'BYE_OK':
-                    pass
-            except (asyncio.TimeoutError, json.JSONDecodeError, AttributeError):
-                pass
-
-            if not writer.is_closing():
-                writer.close()
-                await writer.wait_closed()
-            peer.set('rtt',-1)
-            peer.set('direction','STALE')
-            peer.set('conn', None)
-            peer_table.degrade(peer)
-        return True
-    except:
-        return False
-
-def _timestamp_now():
-    return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-
-def _local_peer_id():
-    config_dict = cfg.getConfig()
-    return f"{config_dict.get('name')}@{config_dict.get('namespace')}"
-
-def _peer_id_from_peer_table(peer:Peer):
-    if not isinstance(peer, Peer):
-        return None
-
-    name = peer.get("name") if isinstance(peer, Peer) else None
-    namespace = peer.get("namespace") if isinstance(peer, Peer) else None
-    if name and namespace:
-        return f"{name}@{namespace}"
-
-    return None
-
-def build_bye(src_id=None, dst_id=None,msg_id=None,reason="Closing session...",ttl=cfg.getConfig().get('ttl',1)):
-    return {
-        "type": "BYE",
-        "msg_id": (msg_id or uuid.uuid4()),
-        "src": src_id,
-        "dst": dst_id,
-        "reason": reason,
-        "ttl": ttl//ttl
-}
 
 
 def build_ping(msg_id=None, timestamp=None, ttl=cfg.getConfig().get('ttl',1)):
@@ -168,12 +109,12 @@ async def ping_loop(peer:Peer,interval=1):
         logger.debug("Probably, the 'keep_alive_interval' parameter in config file is configured wrong.")
 
 async def start_PingPong():
-    try:
-        async with peer_table_lock:
-            peers_connected = peer_table.get('conn')
 
-        tasks = [ping_loop(peer) for peer in peers_connected if (peer.get('direction') != 'STALE')]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+    async with peer_table_lock:
+        peers_connected = peer_table.get('conn')
+
+    tasks = [ping_loop(peer) for peer in peers_connected if (peer.get('direction') != 'STALE')]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
         
-    except asyncio.CancelledError:
-        logger.debug(f"Task 'start_PingPong' closed.")
+    if results:
+        return True
