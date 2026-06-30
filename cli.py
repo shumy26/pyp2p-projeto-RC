@@ -6,11 +6,9 @@ from dataclasses import dataclass
 import peer_connection as pc
 import peer_table as pt
 import project_config as cfg
-import project_log as plog
 import rendevouz_connection as rdv
 import state
 import message_router as router
-import teste_parallelism2 as parallel
 import p2p_client as p2p
 
 logger = logging.getLogger("CLI")
@@ -36,13 +34,6 @@ HELP_TEXT = """
 class BackgroundService:
     task: asyncio.Task
     name: str
-
-def _configure_logging():
-    plog.create_logs()
-
-    root_logger = logging.getLogger()
-    if not root_logger.handlers:
-        logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(name)s: %(message)s')
 
 def _show_help():
     print(HELP_TEXT)
@@ -95,28 +86,30 @@ async def _find_peer_by_id(peer_id: str, state:str='both'):
             return None
 
 
-async def _ensure_connected(peer: pt.Peer):
-    if not isinstance(peer, pt.Peer):
-        return False
+# async def _ensure_connected(peer: pt.Peer):
+#     if not isinstance(peer, pt.Peer):
+#         return False
 
-    if peer in (pt.peer_table.get("conn") or set()):
-        return True
+#     if peer in (pt.peer_table.get("conn") or set()):
+#         return True
 
-    return False
+#     return False
 
 
 def _print_peers(discover_dict):
     if not discover_dict or not isinstance(discover_dict, dict):
         print("No peer was found within the search.")
         return
-
+    
     peers = discover_dict.get("peers") or []
     if not peers:
         return
 
+    my_id = f"{cfg.getConfig().get("name")}@{cfg.getConfig().get("namespace")}"
     for peer in peers:
         peer_id = peer.get("peer_id") or f"{peer.get('name')}@{peer.get('namespace')}"
-        print(f"• {peer_id} | {peer.get('ip')}:{peer.get('port')} | ttl = {peer.get('ttl')}")
+        if peer_id != my_id: 
+            print(f"• {peer_id} | {peer.get('ip')}:{peer.get('port')} | ttl = {peer.get('ttl')}")
 
 
 def _print_connections():
@@ -128,7 +121,7 @@ def _print_connections():
     for peer in peers:
         peer_id = _peer_identity(peer)
         print(
-            f"• {peer_id} | {peer.get('direction')} | {peer.get('ip')}:{peer.get('port')} | RTT = {(peer.get('rtt') + 'ms') if peer.get('rtt') != -1 else "Not yet measured"}"
+            f"• {peer_id} | {peer.get('direction')} | {peer.get('ip')}:{peer.get('port')} | RTT = {(str(peer.get('rtt')) + 'ms') if peer.get('rtt') != -1 else "Not yet measured"}"
         )
 
 
@@ -156,10 +149,11 @@ def _print_rtt():
 
 async def _reconnect():
     try:
-        not_conn_peers = [pc.handle_outbound_connection(not_conn_peer) for not_conn_peer in pt.peer_table.get('nconn') if not_conn_peer.get('direction') != 'STALE']
+        not_conn_peers = [pc.handle_outbound_connection(not_conn_peer) for not_conn_peer in pt.peer_table.get('nconn') if not_conn_peer.get('direction') == 'STALE']
 
         if not not_conn_peers:
-            logger.debug("No one to reconciliate.")
+            print("No one to reconciliate.")
+            return False
 
         connected = await asyncio.gather(*not_conn_peers)
 
@@ -202,7 +196,7 @@ async def _list_peers(namespace_token: str | None):
         return
 
     discover_dict = await rdv.discover(namespace if namespace != "*" else None)
-    state.state(discover_dict)
+    await state.state(discover_dict)
     _print_peers(discover_dict)
 
 
@@ -212,16 +206,17 @@ async def _initial_bootstrap():
     if isinstance(register_response, dict) and register_response.get("ip"):
         cfg.addConfig("ip", register_response["ip"])
 
+    logger.info("You have been registered in the network.")
+
     discover_dict = await rdv.discover()
-    state.state(discover_dict)
+    await state.state(discover_dict)
 
 
 async def _start_background_services():
     services = [
         BackgroundService(asyncio.create_task(p2p.loop_register()), "register-loop"),
         BackgroundService(asyncio.create_task(p2p.loop_discover()), "discover-loop"),
-        BackgroundService(asyncio.create_task(p2p._wait_for_state()), "state-reconcile"),
-        BackgroundService(asyncio.create_task(p2p._wait_and_ping()), "ping-loop"),
+        BackgroundService(asyncio.create_task(p2p._wait_for_state()), "connect-loop")
     ]
     return services
 
@@ -244,16 +239,17 @@ async def _shutdown_background_services(services):
 
 
 async def repl():
-    _configure_logging()
     await _initial_bootstrap()
     services = await _start_background_services()
+    # await p2p.main()
     # start auto-connect loop to attempt connections to all discovered peers
 
     print("REPL iniciado. Digite /help para ver os comandos.")
+    _show_help()
 
     try:
         while True:
-            raw = (await _ainput("p2p> ")).strip()
+            raw = (await _ainput("\np2p> ")).strip()
             if not raw:
                 continue
 
@@ -274,8 +270,12 @@ async def repl():
                     continue
                 peer_id = parts[1]
                 message = raw.split(None, 2)[2]
-                await _send_direct(peer_id, message)
-                continue
+                try:
+                    await _send_direct(peer_id, message)
+                    continue
+                except OSError:
+                    logger.info("The peer already disconnected.")
+                    continue
 
             if raw.startswith("/pub "):
                 parts = shlex.split(raw, posix=True)
@@ -312,7 +312,8 @@ async def repl():
 
                 logging.getLogger().setLevel(level)
                 for handler in logging.getLogger().handlers:
-                    handler.setLevel(level)
+                    if isinstance(handler, logging.StreamHandler):
+                        handler.setLevel(level)
                 print(f"Log level adjusted to: {level_name}.")
                 continue
 
@@ -323,7 +324,6 @@ async def repl():
 
     finally:
         await _shutdown_background_services(services)
-
 
 def main():
     asyncio.run(repl())

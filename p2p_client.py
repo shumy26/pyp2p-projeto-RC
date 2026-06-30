@@ -80,7 +80,7 @@ async def loop_discover():
     try:
         while True:
             d1 = await rdv.discover()
-            d2 = state.state(d1)
+            d2 = await state.state(d1)
             logger.debug(f"Peers discovered: {d2}")
             await asyncio.sleep(time2discover - 0.4)
     except asyncio.CancelledError:
@@ -107,7 +107,7 @@ async def exit_control():
 
 async def _wait_for_state():
     interval = cfg.getConfig().get('discover_interval',10)
-    await asyncio.sleep(2*interval) # Wait 2 loops to try to connect to peers
+    await asyncio.sleep(3) # Wait 3 seconds to try to connect to peers
 
     try:
         tasks = (pc.start_outbound(), pc.start_inbound())
@@ -115,33 +115,37 @@ async def _wait_for_state():
     except:
         return None
 
-async def _wait_and_ping():
-    interval = cfg.getConfig().get('discover_interval',10)
-    await asyncio.sleep(5*interval)  # Wait 5 loops to try to ping peers
-    try:
-        while True:
-            try:
-                res = asyncio.run(ka.start_PingPong())
-            except asyncio.CancelledError:
-                logger.debug(f"Task 'start_PingPong' closed.")
-                pass
-    except:
-        return None
+# async def _wait_and_ping():
+#     interval = cfg.getConfig().get('discover_interval',10)
+#     await asyncio.sleep(5*interval)  # Wait 5 loops to try to ping peers
+#     try:
+#         while True:
+#             try:
+#                 res = await asyncio.gather(ka.start_PingPong(), return_exceptions=True)
+#                 if isinstance(res.pop(),BaseException):
+#                     pass
+#             except asyncio.CancelledError:
+#                 logger.debug(f"Task 'start_PingPong' closed.")
+#                 pass
+#     except:
+#         return None
 
-async def new_connection(event:asyncio.Event):
-    if event.is_set():
-        return True
-    else:
-        return False
+# async def new_connection(event:asyncio.Event):
+#     if event.is_set():
+#         return True
+#     else:
+#         return False
 
-async def all_peers_messages():
-    interval = cfg.getConfig().get('discover_interval',10)
+# async def all_peers_messages():
+#     interval = cfg.getConfig().get('discover_interval',10)
 
-    while True:
-        await asyncio.sleep(3*interval)
-        try:
-            tasks = [handle_incoming_message(peer) for peer in peer_table.get('conn')]
-            result = asyncio.gather(*tasks)
+#     while True:
+#         await asyncio.sleep(3*interval)
+#         try:
+#             tasks = [handle_incoming_message(peer) for peer in peer_table.get('conn')]
+#             result = asyncio.gather(*tasks)
+#         except:
+#             return None
 
 
 
@@ -151,7 +155,7 @@ async def main():
             tg.create_task(loop_register())
             tg.create_task(loop_discover())
             tg.create_task(_wait_for_state())
-            tg.create_task(_wait_and_ping())
+            # tg.create_task(_wait_and_ping())
             tg.create_task(exit_control())
     except:
         return None

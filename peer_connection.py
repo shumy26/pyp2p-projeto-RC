@@ -7,7 +7,8 @@ import logging
 
 import project_config as cfg
 from peer_table import *
-from message_router import _local_peer_id, _peer_id as _peer_id_from_peer_table, build_hello, build_hello_ok
+from message_router import _local_peer_id, _peer_id as _peer_id_from_peer_table, build_hello, build_hello_ok,handle_incoming_message
+from keep_alive import ping_loop
 
 logger = logging.getLogger('PeerConnector')
 
@@ -69,6 +70,8 @@ async def peer_connection(peer:Peer):
                 async with peer_table_lock:
                     peer_table.update(peer)
                 logger.info(f"Outbound Connection Established: {peer_id}.")
+                asyncio.create_task(handle_incoming_message(peer))
+                asyncio.create_task(ping_loop(peer))
                 return True
 
             case _:
@@ -78,24 +81,24 @@ async def peer_connection(peer:Peer):
 
     # Raised when the peer refuses the connection
     except ConnectionRefusedError:
-        logger.error(f"The peer {peer_id} refused to connect.")
+        logger.debug(f"The peer {peer_id} refused to connect.")
         peer.decrease_attempts()
         return False
 
     # Raised when the socket could not connect to the IP address in a given time
     except TimeoutError:
-        logger.error(f"Connection to {peer_id} timed out.")
+        logger.debug(f"Connection to {peer_id} timed out.")
         peer.decrease_attempts()
         return False
 
     # Raised when there are possibly no routes to that server
     except OSError:
-        logger.error(f"There was a network issue and it was not possible to connect to {peer_id} or the socket is already instantiated.")
+        logger.debug(f"There was a network issue and it was not possible to connect to {peer_id} or the socket is already instantiated.")
         peer.decrease_attempts()
         return False
     
     except json.JSONDecodeError:
-        logger.error("The peer answered the request with an invalid JSON object.")
+        logger.debug("The peer answered the request with an invalid JSON object.")
         peer.decrease_attempts()
         return False
 
@@ -176,10 +179,6 @@ async def handle_inbound_connection(reader:asyncio.StreamReader, writer:asyncio.
         async with peer_table_lock:
             for peer in peer_table.get('nconn'):
                 if (peer.get('ip') == peer_ip and peer.get('port') == peer_port) and (peer.get('direction') != 'STALE'):
-                    peer.set('direction','Inbound')
-                    peer.set('attempts',peer.get('attempts'))
-                    peer.set('conn',(reader,writer))
-                    peer_table.update(peer)
                     current_peer = peer
                     break
 
@@ -204,13 +203,24 @@ async def handle_inbound_connection(reader:asyncio.StreamReader, writer:asyncio.
 
             case "HELLO":
                 logger.debug(f"HELLO received from: {peer_id}.")
+
+                current_peer.set('direction','Inbound')
+                current_peer.set('attempts',current_peer.get('attempts'))
+                current_peer.set('conn',(reader,writer))
+                peer_table.update(current_peer)
+
+                logger.info(f"Inbound Connection Established: {peer_id}.")
+
+                asyncio.create_task(handle_incoming_message(peer))
+                asyncio.create_task(ping_loop(peer))
+
                 response_dict = build_hello_ok(my_id,features=cfg.getConfig().get('features'))
                 response = json.dumps(response_dict) + '\n'
 
                 writer.write(response.encode())
                 await writer.drain()
                 logger.debug(f"HELLO_OK sent to: {peer_id}.")
-                logger.info(f"Inbound Connection Established: {peer_id}.")
+
                 await asyncio.sleep(1)
 
             case _:
@@ -269,12 +279,12 @@ async def start_outbound():
                 async with peer_table_lock:
                     peers_not_connected = peer_table.get('nconn')
                 logger.debug("There are no peers disconnected or all the peers are 'STALE'.")
-                await asyncio.sleep(discover_interval)
+                await asyncio.sleep(2 * discover_interval) # Interval chosen to wait some seconds before trying to connect to any peer again.
 
             tasks = [handle_outbound_connection(peer) for peer in peers_not_connected if peer.get('direction') != 'STALE']
             results = await asyncio.gather(*tasks, return_exceptions=True) # The variable is just to hold the operations and not let python garbage collect them
             
-            await asyncio.sleep(2 * discover_interval)
+            await asyncio.sleep(2 * discover_interval) # Interval chosen to wait some seconds before trying to connect to any peer again.
 
     except asyncio.CancelledError:
         logger.debug(f"Task 'start_outbound' closed.")

@@ -219,7 +219,7 @@ async def discover(namespace=None):
                     return None
                 
         elif (response_dict["status"] == "OK" and len(response_dict["peers"]) == 0):
-            logger.warning("There is no peer with the namespace that you entered.")
+            logger.debug("There is no peer with the namespace that you entered.")
             return None
         
         logger.debug("Closing connection...")

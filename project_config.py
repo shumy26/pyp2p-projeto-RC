@@ -109,7 +109,7 @@ def change_config(rdv_name=None, rdv_port=None, name=None, port=None, namespace=
         logger.debug(f"Changed the config file successfully.")
         return old_config_dict
     except:
-        logger.error("Something went wrong when changing the config file.")
+        logger.debug("Something went wrong when changing the config file.")
         return None
 
 # This function reads the config file and returns a dict like object with its {options:values}.
@@ -136,7 +136,7 @@ def getConfig():
 def addConfig(new_config, new_value):
     try:
         current_config = getConfig()
-        current_config.setdefault(new_config, new_value)
+        current_config[new_config] = new_value
         change_config(**current_config)
         logger.debug(f"Added new config -> ({new_config}:{new_value}).")
     except:

@@ -8,20 +8,22 @@
 import logging
 import logging.handlers
 import os
-import asyncio
+# import asyncio
 
-import peer_connection as pc
-import peer_table as pt
-import project_config as cfg
+# import peer_connection as pc
+# import peer_table as pt
+# import project_config as cfg
 import project_log as plog
-import rendevouz_connection as rdv
-import state
-import message_router as router
-import teste_parallelism2 as parallel
-import p2p_client as p2p
+# import rendevouz_connection as rdv
+# import state
+# import message_router as router
+# import teste_parallelism2 as parallel
+# import p2p_client as p2p
 import cli as cli
 
 # ------ Formatting logs ------- #
+
+plog.create_logs()
 
 class ColorLogFormatter(logging.Formatter):
     styles = {
@@ -83,7 +85,7 @@ logger.addHandler(console_handler)
 
 file_handler = logging.handlers.RotatingFileHandler(
     filename=os.path.join('logs', 'p2p_app.log'),
-    maxBytes=5 * 1024 * 1024,
+    maxBytes=5 * 1024 * 1024, # 5 MB max of file
     backupCount=5,
     encoding='utf-8',
     mode='a'
@@ -92,13 +94,6 @@ file_handler.setLevel(logging.DEBUG)
 file_handler.setFormatter(logging.Formatter('[%(levelname)s][%(asctime)s] %(name)s.%(funcName)s: %(message)s', datefmt='%a %d/%m/%Y %H:%M:%S'))
 logger.addHandler(file_handler)
 
-try:
-    # `cli.main()` already runs the asyncio loop internally; call it directly.
-    cli.main()
-    asyncio.run(rdv.unregister())
-except KeyboardInterrupt:
-    try:
-        asyncio.run(rdv.unregister())
-    except Exception:
-        pass
-    print('Ctrl-C')
+
+# `cli.main()` already runs the asyncio loop internally; call it directly.
+cli.main()

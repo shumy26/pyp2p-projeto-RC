@@ -7,71 +7,51 @@ import uuid
 from peer_table import *
 import project_config as cfg
 from p2p_client import disconnect_peer
-from message_router import _timestamp_now, _peer_id as _peer_id_from_peer_table
+from message_router import _peer_id as _peer_id_from_peer_table, build_ping
 
 logger = logging.getLogger("KeepAlive")
 
-
-def build_ping(msg_id=None, timestamp=None, ttl=cfg.getConfig().get('ttl',1)):
-    return {
-        "type": "PING",
-        "msg_id": str(msg_id or uuid.uuid4()),
-        "timestamp": timestamp or _timestamp_now(),
-        "ttl": ttl//ttl,
-    }
-
-
-def build_pong(msg_id, timestamp, ttl=cfg.getConfig().get('ttl',1)):
-    return {
-        "type": "PONG",
-        "msg_id": str(msg_id),
-        "timestamp": timestamp,
-        "ttl": ttl//ttl,
-    }
-
-
-async def ping(peer:Peer, wait_time=cfg.getConfig().get('timeout'), msg_size=cfg.getConfig().get('msg_size',32768),attempts=cfg.getConfig().get('max_reconnect_attempts')):
-
+async def ping(peer:Peer):
+    wait_time=cfg.getConfig().get('timeout')
+    msg_size=cfg.getConfig().get('msg_size',32768)
+    attempts=cfg.getConfig().get('max_reconnect_attempts')
+    # -----------------------------------------------------
     peer_id = _peer_id_from_peer_table(peer)
     config_dict = cfg.getConfig()
     ttl = config_dict.get("keep_alive_ttl", 1)
     reader, writer = peer.get('conn')
     tries = 1
+    # -----------------------------------------------------
+    loop = asyncio.get_event_loop()
+    pong_future = loop.create_future()
+    peer.set('pong',pong_future)
 
     try:
-        async with peer.get('lock'):
-            ping_dict = build_ping(ttl=ttl)
-            request_string = json.dumps(ping_dict) + '\n'
 
-            while tries < attempts:
-                logger.debug(f"Sending PING: {json.dumps(ping_dict, ensure_ascii=False)} (Attempt {tries}).")
+        ping_dict = build_ping(ttl=ttl)
+        request_string = json.dumps(ping_dict) + '\n'
 
-                started_at = time.perf_counter()
+        while tries < attempts:
+            logger.debug(f"Sending PING: {json.dumps(ping_dict, ensure_ascii=False)} (Attempt {tries}).")
+
+            async with peer.get('lock'):
                 writer.write(request_string.encode())
                 await writer.drain()
                 
-                try:
-                    response_string = await asyncio.wait_for(reader.read(msg_size), wait_time)
-                
-                    response_string = response_string.decode().strip('\n')
-                    elapsed_ms = (time.perf_counter() - started_at) * 1000
-                    peer.set('rtt',round(elapsed_ms,2))
+            started_at = time.perf_counter()
+            try:
+                response_string = await asyncio.wait_for(pong_future, wait_time)
+                elapsed_ms = (time.perf_counter() - started_at) * 1000
+                peer.set('rtt',round(elapsed_ms,2))
+                logger.debug(f"PONG from {peer_id} received. RTT: {round(elapsed_ms,2)}.")
 
-                    response_dict = json.loads(response_string)
-                    match response_dict.get('type'):
-                        case 'PONG':
-                            logger.debug(f"PING sent to {peer_id}, PONG received.")
-                            pass
-                        case _:
-                            logger.debug(f"The peer sent an invalid response to PING. Disconnecting from {peer_id}.")
-                            break
+                return True
 
-                    return True
+            except asyncio.TimeoutError:
+                await asyncio.sleep(2)
+                tries += 1
 
-                except asyncio.TimeoutError:
-                    await asyncio.sleep(1)
-                    tries += 1
-
+        logger.warning(f"The peer {peer_id} didn't respond the PingPong protocol after {tries} attemps. It will be disconnected...")
         disconnected = await disconnect_peer(peer, writer=writer,reader=reader)
         if disconnected:
             return False
@@ -97,24 +77,28 @@ async def ping(peer:Peer, wait_time=cfg.getConfig().get('timeout'), msg_size=cfg
         disconnected = await disconnect_peer(peer, writer=writer,reader=reader)
         return None
 
-async def ping_loop(peer:Peer,interval=1):
+async def ping_loop(peer:Peer):
     interval = cfg.getConfig().get("keep_alive_interval",30)
     try:
         while True:
-            logger.debug(f"The code entred in the ping_loop with {interval} seconds")
-            await ping(peer)
-            logger.debug(f"The code tried to ping to {peer}.")
-            await asyncio.sleep(interval)
-    except TypeError:
-        logger.debug("Probably, the 'keep_alive_interval' parameter in config file is configured wrong.")
+            try:
+                logger.debug(f"The code entered in the ping_loop to {_peer_id_from_peer_table(peer)} with {interval} seconds")
+                await ping(peer)
+                logger.debug(f"The code tried to ping to {_peer_id_from_peer_table(peer)}.")
+                await asyncio.sleep(interval)
+            except TypeError:
+                logger.debug("Probably, the 'keep_alive_interval' parameter in config file is configured wrong.")
+                pass
+    except:
+        logger.debug("Something went wrong in the ping_loop. Closing the task.")
 
-async def start_PingPong():
+# async def start_PingPong():
 
-    async with peer_table_lock:
-        peers_connected = peer_table.get('conn')
+#     async with peer_table_lock:
+#         peers_connected = peer_table.get('conn')
 
-    tasks = [ping_loop(peer) for peer in peers_connected if (peer.get('direction') != 'STALE')]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+#     tasks = [ping_loop(peer) for peer in peers_connected if (peer.get('direction') != 'STALE')]
+#     results = await asyncio.gather(*tasks, return_exceptions=True)
         
-    if results:
-        return True
+#     if results:
+#         return True

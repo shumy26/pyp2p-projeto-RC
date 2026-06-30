@@ -9,11 +9,11 @@ from peer_table import *
 
 logger = logging.getLogger('StateManager')
 
-def state(discover_dict):
+async def state(discover_dict):
     # If the discover returned 'None' to this function, than it is a specific search for peers
     # which did not returned anything
     if discover_dict == None:
-        logger.warning("There were no peers to be found within this search.")
+        logger.debug("There were no peers to be found within this search.")
         return None
 
     # If it return an empty dict, it is beacuse the user is not registered in the network
@@ -32,14 +32,15 @@ def state(discover_dict):
             new_set.add(peer)
 
     # Updates PeerTable verifying if the peers connected to the rendevouz changed
-    union = peer_table.get('nconn').union(new_set) 
-    diff = peer_table.get('nconn').difference(new_set)
-    new_set = union.difference(diff)
+    async with peer_table_lock:
+        union = peer_table.get('nconn').union(new_set) 
+        diff = peer_table.get('nconn').difference(new_set)
+        new_set = union.difference(diff)
 
-    intersection = peer_table.get('conn').intersection(new_set)
-    new_set = new_set.difference(intersection)
+        intersection = peer_table.get('conn').intersection(new_set)
+        new_set = new_set.difference(intersection)
 
-    peer_table.set(new_set, 'nconn')
+        peer_table.set(new_set, 'nconn')
 
     # Verifies if the PeerTable exists. If it doesn't, create it
     cwd = os.path.dirname(os.path.realpath(__file__))

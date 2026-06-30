@@ -18,6 +18,7 @@ class Peer():
         self.__lock = asyncio.Lock()
         self.__rtt = -1
         self.__ack_future = None
+        self.__pong_future = None
 
     def get(self,attribute:str=''):
         try:
@@ -42,6 +43,8 @@ class Peer():
                     return self.__lock
                 case 'ack':
                     return self.__ack_future
+                case 'pong':
+                    return self.__pong_future
                 case _:
                     raise AttributeError
 
@@ -79,6 +82,9 @@ class Peer():
                 case 'ack':
                     self.__ack_future = new_value
                     return self.__ack_future
+                case 'pong':
+                    self.__pong_future = new_value
+                    return self.__pong_future
                 case _:
                     raise AttributeError
 
@@ -165,10 +171,10 @@ class PeerTable():
         return (peer in self.__connected or peer in self.__not_connected)
     
     def __repr__(self):
-        return f"'Connected':{[peer for peer in self.__connected]},'Not Connected:{[peer for peer in self.__not_connected]}'"
+        return f"'Connected':{[peer for peer in self.__connected]},'Not Connected':{[peer for peer in self.__not_connected]}"
 
     def __str__(self):
-        return f"'Connected':{[peer for peer in self.__connected]},'Not Connected:{[peer for peer in self.__not_connected]}'"
+        return f"'Connected':{[peer for peer in self.__connected]},'Not Connected':{[peer for peer in self.__not_connected]}"
 
 peer_table = PeerTable()
 peer_table_lock = asyncio.Lock()
