@@ -176,18 +176,18 @@ async def handle_inbound_connection(reader:asyncio.StreamReader, writer:asyncio.
         peer_ip, peer_port = writer.get_extra_info('peername')
 
         current_peer = Peer()
-        async with peer_table_lock:
-            for peer in peer_table.get('nconn'):
-                if (peer.get('ip') == peer_ip and peer.get('port') == peer_port) and (peer.get('direction') != 'STALE'):
-                    current_peer = peer
-                    break
+        # async with peer_table_lock:
+        #     for peer in peer_table.get('nconn'):
+        #         if (peer.get('ip') == peer_ip and peer.get('port') == peer_port) and (peer.get('direction') != 'STALE'):
+        #             current_peer = peer
+        #             break
 
-        if current_peer.get('name') == '':
-            raise ConnectionRefusedError
+        # if current_peer.get('name') == '':
+        #     raise ConnectionRefusedError
 
-        peer_id = _peer_id_from_peer_table(current_peer)
+        # peer_id = _peer_id_from_peer_table(current_peer)
 
-        raw = await reader.read(msg_size)
+        raw = await reader.readuntil(b'\n')
             
         if not raw:
             logger.debug("The peer didn't send HELLO. The connection is being stopped!")
@@ -198,21 +198,25 @@ async def handle_inbound_connection(reader:asyncio.StreamReader, writer:asyncio.
 
         request = raw.decode(encoding='utf-8').strip('\n')
         request_dict = json.loads(request)
+        peer_id = request_dict.get("peer_id")
 
         match request_dict.get('type'):
 
             case "HELLO":
                 logger.debug(f"HELLO received from: {peer_id}.")
 
+                name, namespace = tuple(peer_id.split("@"))
+                current_peer.set("name",name)
+                current_peer.set("namespace",namespace)
                 current_peer.set('direction','Inbound')
                 current_peer.set('attempts',current_peer.get('attempts'))
                 current_peer.set('conn',(reader,writer))
-                peer_table.update(current_peer)
+                peer_table.get("conn").add(current_peer)
 
                 logger.info(f"Inbound Connection Established: {peer_id}.")
 
-                asyncio.create_task(handle_incoming_message(peer))
-                asyncio.create_task(ping_loop(peer))
+                asyncio.create_task(handle_incoming_message(current_peer))
+                asyncio.create_task(ping_loop(current_peer))
 
                 response_dict = build_hello_ok(my_id,features=cfg.getConfig().get('features'))
                 response = json.dumps(response_dict) + '\n'
