@@ -90,6 +90,12 @@ async def ping(peer:Peer):
         logger.debug("The peer returned an invalid JSON response for keep_alive.")
         disconnected = await disconnect_peer(peer)
         return None
+    except asyncio.CancelledError:
+        logger.debug(f"PING/PONG of {peer_id} was cancelled.")
+        if not pong_future.done():
+            pong_future.cancel()
+        
+        raise asyncio.CancelledError
 
 # PING/PONG Loop for each peer (Just sends the PING for 'keep_alive_interval' seconds.)
 
@@ -108,5 +114,8 @@ async def ping_loop(peer:Peer):
             except TypeError:
                 logger.debug("Probably, the 'keep_alive_interval' parameter in config file is configured wrong.")
                 pass
+        
+    except asyncio.CancelledError:
+        pass
     except:
         logger.debug("Something went wrong in the ping_loop. Closing the task.")

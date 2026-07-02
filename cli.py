@@ -15,7 +15,7 @@ logger = logging.getLogger("CLI")
 
 HELP_TEXT = """
 ╔════════════════════════════════════════════════════════════════╗
-║                P2Pchat — Comandos disponíveis                  ║
+║                  P2Pchat — Available commands                  ║
 ╠════════════════════════════════════════════════════════════════╣
 ║  /peers [* | #namespace]      Discover and List Peers          ║
 ║  /msg <peer_id> <mensagem>    Send a direct message to a Peer  ║
@@ -86,16 +86,6 @@ async def _find_peer_by_id(peer_id: str, state:str='both'):
             return None
 
 
-# async def _ensure_connected(peer: pt.Peer):
-#     if not isinstance(peer, pt.Peer):
-#         return False
-
-#     if peer in (pt.peer_table.get("conn") or set()):
-#         return True
-
-#     return False
-
-
 def _print_peers(discover_dict):
     if not discover_dict or not isinstance(discover_dict, dict):
         print("No peer was found within the search.")
@@ -109,7 +99,7 @@ def _print_peers(discover_dict):
     for peer in peers:
         peer_id = peer.get("peer_id") or f"{peer.get('name')}@{peer.get('namespace')}"
         if peer_id != my_id: 
-            print(f"• {peer_id} | {peer.get('ip')}:{peer.get('port')} | ttl = {peer.get('ttl')}")
+            print(f"• {peer_id} | {peer.get('ip')}:{peer.get('port')} | ttl = {peer.get('ttl')}s | Expires in: {peer.get('expires_in')}")
 
 
 def _print_connections():
@@ -149,13 +139,11 @@ def _print_rtt():
 
 async def _reconnect():
     try:
-        not_conn_peers = [pc.handle_outbound_connection(not_conn_peer) for not_conn_peer in pt.peer_table.get('nconn') if not_conn_peer.get('direction') == 'STALE']
+        not_conn_peers = [asyncio.create_task(pc.handle_outbound_connection(not_conn_peer)) for not_conn_peer in pt.peer_table.get('nconn') if not_conn_peer.get('direction') == 'STALE']
 
         if not not_conn_peers:
             print("No one to reconciliate.")
             return False
-
-        connected = await asyncio.gather(*not_conn_peers)
 
     except:
         logger.error(f"An error occured when trying to reconciliate.")
@@ -196,6 +184,7 @@ async def _list_peers(namespace_token: str | None):
         return
 
     discover_dict = await rdv.discover(namespace if namespace != "*" else None)
+    
     await state.state(discover_dict)
     _print_peers(discover_dict)
 
@@ -221,21 +210,13 @@ async def _start_background_services():
 
 
 async def _shutdown_background_services(services):
-    for service in services:
-        service.task.cancel()
-
-    await asyncio.gather(*(service.task for service in services), return_exceptions=True)
-
-    # try:
-    #     await p2p.terminate_peers()
-    # except Exception:
-    #     pass
-
-    # try:
-    #     await rdv.unregister()
-    # except Exception:
-    #     pass
-
+    curr_task = asyncio.current_task()
+    tasks = [t for t in asyncio.all_tasks() if t is not curr_task]
+    for t in tasks:
+        if not t.cancelled():
+            t.cancel()
+    
+    return True
 
 async def repl():
     cfg.write_config()
@@ -249,7 +230,7 @@ async def repl():
     # await p2p.main()
     # start auto-connect loop to attempt connections to all discovered peers
 
-    print("REPL started. Type /help to see al the available commands.")
+    print("REPL iniciado. Digite /help para ver os comandos.")
     _show_help()
 
     try:
@@ -325,7 +306,7 @@ async def repl():
             if raw == "/quit":
                 break
 
-            print("Unknown command. Use /help.")
+            print("Comando desconhecido. Use /help.")
 
     except KeyboardInterrupt:
         pass

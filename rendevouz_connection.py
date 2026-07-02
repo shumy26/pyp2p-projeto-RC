@@ -138,7 +138,7 @@ async def register():
                     logger.error("The rendevouz didn't respond correctly.")
                     return None
                 case _:
-                    logger.error(f"From the rendevouz: {message}.")
+                    logger.debug(f"From the rendevouz: {message}.")
                     return None
         else:
             logger.debug("The server returned OK.")
@@ -150,7 +150,12 @@ async def register():
         await writer.wait_closed()
         logger.debug("Connection closed.")
         return response_dict
-    
+
+    # Raised when the response received is not a valid JSON object
+    except json.JSONDecodeError:
+        logger.debug("An error occured when trying to decode the JSON on REGISTER.")
+        return None
+
     # Raised when the server refuses the connection
     except ConnectionRefusedError:
         logger.error("The server refused to connect.")
@@ -215,7 +220,7 @@ async def discover(namespace=None):
                     logger.error("The rendevouz didn't respond correctly.")
                     return None
                 case _:
-                    logger.error(f"From the rendevouz: {message}.")
+                    logger.debug(f"From the rendevouz: {message}.")
                     return None
                 
         elif (response_dict["status"] == "OK" and len(response_dict["peers"]) == 0):
@@ -229,6 +234,10 @@ async def discover(namespace=None):
 
         logger.debug("The server returned the PeerList.")
         return response_dict
+    
+    except json.JSONDecodeError:
+        logger.debug("An error occured when trying to decode the JSON on DISCOVER.")
+        return None
     
     except ConnectionRefusedError:
         logger.error("The server refused to connect.")
@@ -312,7 +321,7 @@ async def unregister():
                     logger.error("The rendevouz didn't respond correctly.")
                     return None
                 case _:
-                    logger.error(f"From the rendevouz: {message}.")
+                    logger.debug(f"From the rendevouz: {message}.")
                     return None
         else:
             logger.info("You have been successfully unregistered.")
@@ -323,6 +332,10 @@ async def unregister():
         logger.debug("Connection closed.")
         return response_dict
     
+    except json.JSONDecodeError:
+        logger.debug("An error occured when trying to decode the JSON on UNREGISTER.")
+        return None
+
     except ConnectionRefusedError:
         logger.error("The server refused to connect.")
         return None

@@ -7,7 +7,7 @@ import project_config as cfg
 import rendevouz_connection as rdv
 import peer_connection as pc
 import keep_alive as ka
-from message_router import _local_peer_id, _peer_id as _peer_id_from_peer_table, build_bye, handle_incoming_message
+from message_router import _local_peer_id, _peer_id as _peer_id_from_peer_table, build_bye, handle_incoming_message, send_bye
 from peer_table import *
 
 logger = logging.getLogger("P2PHandler")
@@ -81,11 +81,19 @@ async def disconnect_peer(peer:Peer):
             peer.set('direction','STALE')
             peer.set('conn', None)
             peer.set('attempts',cfg.getConfig().get('max_reconnect_attempts',6))
-            peer_table.degrade(peer)
 
         return True
     except:
         return False
+
+# async def terminate_all_peers():
+
+#     async with peer_table_lock:
+#         for conn_peer in peer_table.get('conn'):
+            
+#             reader, writer = conn_peer.get('conn')
+        
+#             break
 
 # -------- Loops ----------
 

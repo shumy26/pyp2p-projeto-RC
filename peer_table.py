@@ -7,7 +7,7 @@ logger = logging.getLogger("PeerTableManager")
 # Implementation of class Peer. It instantiates and stores all the information needed for each peer in the network, being connected or not.
 class Peer():
     '''Peers information inside a class (NAME, NAMESPACE, IP, PORT, direction (Inbound, Outbound ou STALE), number of remaining attempts to connect, connection objects (a 2-tuple of reader and writer) and its rtt to you)'''
-    def __init__(self, NAME='',NAMESPACE='', IP='', PORT=65535):
+    def __init__(self, NAME='',NAMESPACE='', IP='', PORT=0):
         self.__name = NAME
         self.__namespace = NAMESPACE
         self.__ip = IP
@@ -118,10 +118,10 @@ class Peer():
         if not isinstance(other,Peer):
             return NotImplemented
 
-        return (self.__ip == other.get('ip') and self.__port == other.get('port'))
+        return (self.__ip == other.get('ip') and self.__name == other.get('name') and self.__namespace == other.get('namespace'))
 
     def __hash__(self):
-        return hash((self.__ip, self.__port))
+        return hash((self.__ip, self.__name, self.__namespace))
     
     def __repr__(self):
         return f"Peer[{self.__name}@{self.__namespace}]"
@@ -164,7 +164,12 @@ class PeerTable():
             return self.__connected
         
         if state.lower() == 'not_connected' or state.lower() == 'nconn':
-            self.__not_connected = new_set
+            for peer in new_set:
+                if peer in self.__not_connected:
+                    pass
+                else:
+                    self.__not_connected.add(peer)
+            # self.__not_connected = new_set
             return self.__not_connected
         
         else:
@@ -186,8 +191,25 @@ class PeerTable():
             self.__not_connected.add(peer)
         finally:
             pass
-        
     
+    # For the context of use of this function, ID is a 3-tuple: (IP, Name, Namespace)
+    def isPeerIDConn(self, peer:Peer):
+        for conn_peer in self.__connected:
+            if conn_peer == peer:
+                logger.debug(f"From State Conn, Port: {peer.get("port")}")
+                return (True, -1)
+        
+        return (False, None)
+    
+    def isPeerIDNotConn(self, peer:Peer):
+        for nconn_peer in self.__not_connected:
+            if nconn_peer == peer:
+                logger.debug(f"From State NConn, Port: {nconn_peer.get("port")}")
+                return (True, nconn_peer.get("port"))
+    
+        return (False, None)
+
+
     # Used to iterate over the object.
     def __contains__(self,peer):
         return (peer in self.__connected or peer in self.__not_connected)
@@ -198,6 +220,10 @@ class PeerTable():
 
     def __str__(self):
         return f"'Connected':{[peer for peer in self.__connected]},'Not Connected':{[peer for peer in self.__not_connected]}"
+    
+    def __iter__(self):
+        for peer in self.__connected.union(self.__not_connected):
+            yield peer
 
 # Initialize the peer_table as empty.
 # Initialize a lock object too, that will be necessary to change it and to get its state as the asynchronous code is running.

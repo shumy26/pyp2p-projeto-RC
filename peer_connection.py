@@ -7,6 +7,7 @@ import logging
 import traceback
 
 import project_config as cfg
+import rendevouz_connection as rdv
 from peer_table import *
 from message_router import _local_peer_id, _peer_id as _peer_id_from_peer_table, build_hello, build_hello_ok,handle_incoming_message
 from keep_alive import ping_loop
@@ -25,7 +26,6 @@ async def peer_connection(peer:Peer):
     # Get some IDs from your peer and the one you are trying to connect.
 
     my_id = _local_peer_id()
-    my_port = cfg.getConfig().get("port")
     peer_id = _peer_id_from_peer_table(peer)
     host = peer.get('ip')
     port = peer.get('port')
@@ -40,7 +40,7 @@ async def peer_connection(peer:Peer):
         # Tries to open a connection with a peer registered in the rendevouz.
 
         logger.debug("Opening a connection...")
-        reader, writer = await asyncio.open_connection(host, port, local_addr=('0.0.0.0',my_port))
+        reader, writer = await asyncio.open_connection(host, port)
         logger.debug(f"The code opened a connection to {peer_id} -> {host}:{port}!")
 
         # Sends a HELLO request to the peer and waits for a HELLO_OK response. If it doesn't answer or it return a wrong answer, it will decrease the total number of attempts of that peer.
@@ -52,7 +52,7 @@ async def peer_connection(peer:Peer):
         writer.write(hello_request)
         await writer.drain()
 
-        response = await reader.read(msg_size)
+        response = await reader.readuntil(b'\n')
 
         if not response:
             return False
@@ -70,12 +70,13 @@ async def peer_connection(peer:Peer):
                 # Updates the PeerTable, changing state of peer from disconnected to connected.
                 async with peer_table_lock:
                     peer_table.update(peer)
+                    logger.debug(f"{peer_table}")
 
                 logger.info(f"Outbound Connection Established: {peer_id}.")
 
                 # Create instances to handle PING and incoming messages of Outbound connections relative to that Peer.
-                asyncio.create_task(handle_incoming_message(peer))
-                asyncio.create_task(ping_loop(peer))
+                asyncio.create_task(handle_incoming_message(peer), name=f"handle_msg_{peer_id}")
+                asyncio.create_task(ping_loop(peer), name=f"handle_ping_{peer_id}")
                 return True
 
             case _:
@@ -98,6 +99,7 @@ async def peer_connection(peer:Peer):
     # Raised when there are possibly no routes to that server.
     except OSError:
         logger.debug(f"There was a network issue and it was not possible to connect to {peer_id} or the socket is already instantiated.")
+        logger.debug(f"{traceback.format_exc()}")
         raise OSError
     
     # Raised when there was an error parsing the json.
@@ -131,12 +133,12 @@ async def peer_connection(peer:Peer):
 
 async def handle_outbound_connection(peer):
 
-    # async with peer_table_lock:
-    #     connected = peer_table.get('conn')
-    #     for conn_peer in connected:
-    #         if conn_peer.get('conn') == peer.get('conn'):
-    #             logger.debug("That peer is already connected.")
-    #             raise OSError
+    async with peer_table_lock:
+        connected = peer_table.get('conn')
+        for conn_peer in connected:
+            if conn_peer == peer:
+                logger.debug("That peer is already connected.")
+                raise OSError
 
     peer_id = _peer_id_from_peer_table(peer)
     connected = False
@@ -183,19 +185,21 @@ async def handle_inbound_connection(reader:asyncio.StreamReader, writer:asyncio.
     my_id = _local_peer_id()
 
     try:
-        # From the peer table, we get the (reader, writer) of each peer. If it already exists (the socket is instantiated), it fails the connection with that peer.
-        async with peer_table_lock:
-            connected = peer_table.get('conn')
-            for peer in connected:
-                if peer.get('conn') == (reader,writer):
-                    logger.debug("That peer is already connected.")
-                    raise Exception
 
-        # Pick the IP and Port number of the peer, and creates a Peer object to it with that info.
-        peer_ip, peer_port = writer.get_extra_info('peername')
+        # Pick the IP of the peer, and creates a Peer object to it with that info.
 
-        current_peer = Peer(IP=peer_ip,PORT=peer_port)
+        peer_ip,_ = writer.get_extra_info("peername")
+
+        current_peer = Peer(IP=peer_ip)
         
+        # From the peer table, we get the (reader, writer) of each peer. If it already exists (the socket is instantiated), it fails the connection with that peer.
+        # async with peer_table_lock:
+        #     connected = peer_table.get('conn')
+        #     for conn_peer in connected:
+        #         if (conn_peer.get("ip"), conn_peer.get("name"), conn_peer.get("namespace")) == (current_peer.get("ip"), current_peer.get("name"), current_peer.get("namespace")):
+        #             logger.debug("That peer is already connected.")
+        #             raise Exception
+
         # Read from the buffer the request.
         raw = await reader.readuntil(b'\n')
         
@@ -215,16 +219,47 @@ async def handle_inbound_connection(reader:asyncio.StreamReader, writer:asyncio.
         match request_dict.get('type'):
             # If the request is a HELLO, sets the Peer attributes accordingly, put it in the PeerTable and sends a HELLO_OK.
             case "HELLO":
+
                 logger.debug(f"HELLO received from: {peer_id}.")
 
                 name, namespace = tuple(peer_id.split("@"))
                 current_peer.set("name",name)
                 current_peer.set("namespace",namespace)
+
+                # Verify if the peer is in the PeerTable. If it isn't make a discover to see who he is.
+                async with peer_table_lock:
+                    isInsidePeerTable, peer_port = peer_table.isPeerIDNotConn(current_peer)
+
+                # If the peer is already connected, cancel the attempt.
+                if not peer_port:
+                    logger.debug("That peer is already connected. Cancelling connection...")
+                    raise OSError
+                
+                if not isInsidePeerTable:
+                    discover_dict = await rdv.discover()
+                    if discover_dict:
+                        peers_list = discover_dict.get("peers",{}).copy()
+                        for i in range(len(peers_list)):
+                            if (peers_list[i]["ip"], peers_list[i]["name"], peers_list[i]["namespace"]) == (peer_ip, name, namespace):
+                                current_peer.set("port",peers_list[i]["port"])
+                        
+                        if current_peer.get("port") == 0:
+                            logger.debug("This peer probably disconnected from the network.")
+                            raise Exception
+                    else:
+                        logger.debug("There is no one in the network.")
+                        raise Exception
+                
+                else:
+                    current_peer.set("port", peer_port)
+
                 current_peer.set('direction','Inbound')
-                current_peer.set('attempts',current_peer.get('attempts'))
                 current_peer.set('conn',(reader,writer))
+
                 async with peer_table_lock:
                     peer_table.get("conn").add(current_peer)
+                    peer_table.get("nconn").discard(current_peer)
+                    logger.debug(f"{peer_table}")
 
                 response_dict = build_hello_ok(my_id,features=cfg.getConfig().get('features'))
                 response = json.dumps(response_dict) + '\n'
@@ -236,8 +271,8 @@ async def handle_inbound_connection(reader:asyncio.StreamReader, writer:asyncio.
                 logger.info(f"Inbound Connection Established: {peer_id}.")
                 
                 # Create instances to handle PING and incoming messages of Inbound connections relative to that Peer
-                asyncio.create_task(handle_incoming_message(current_peer))
-                asyncio.create_task(ping_loop(current_peer))
+                asyncio.create_task(handle_incoming_message(current_peer), name=f"handle_msg_{peer_id}")
+                asyncio.create_task(ping_loop(current_peer), name=f"handle_ping_{peer_id}")
 
                 # Arbitrary wait time to make other tasks run a bit too.
                 await asyncio.sleep(1)
@@ -266,6 +301,10 @@ async def handle_inbound_connection(reader:asyncio.StreamReader, writer:asyncio.
     except ConnectionError:
         logger.info(f"The connection with {peer_id} was terminated by the peer.")
     
+    except OSError:
+        logger.debug(f"The peer {peer_id} tried to connect, but it is already connected.")
+        pass
+
     # If peer_id not found -> raised NameError. If Excpetion is raised, it is because the code raised it when trying to connect to a peer.
     except (NameError, Exception):
         pass
@@ -302,14 +341,15 @@ async def start_outbound():
 
             # This is a loop that continues doing nothing while there are no new peers to connect.
             while (len(peers_not_connected) == 0) or (len(peers_not_connected) != 0 and (False not in [peer.get('dir') == 'STALE' for peer in peers_not_connected])):
+                await asyncio.sleep(2 * discover_interval)
                 async with peer_table_lock:
                     peers_not_connected = peer_table.get('nconn')
                 logger.debug("There are no peers disconnected or all the peers are 'STALE'.")
-                await asyncio.sleep(2 * discover_interval) # Interval chosen to wait some seconds before trying to connect to any peer again.
-
+                 # Interval chosen to wait some seconds before trying to connect to any peer again.
+                
             tasks = [handle_outbound_connection(peer) for peer in peers_not_connected if peer.get('direction') != 'STALE']
             results = await asyncio.gather(*tasks, return_exceptions=True) # The variable is just to hold the operations and not let python garbage collect them
-            
+
             await asyncio.sleep(2 * discover_interval) # Interval chosen to wait some seconds before trying to connect to any peer again.
 
     except asyncio.CancelledError:

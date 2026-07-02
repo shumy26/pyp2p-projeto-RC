@@ -3,6 +3,7 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone
+import traceback
 
 import project_config as cfg
 import peer_table as pt
@@ -133,7 +134,7 @@ def _get_peer_streams(peer: pt.Peer | None):
 async def _send_data(writer: asyncio.StreamWriter, data):
     # Serialize the payload and send it over the peer stream as a newline-delimited JSON message.
     json_data = json.dumps(data).encode('utf-8') + b'\n'
-    if cfg.getConfig().get("msg_size") is None or cfg.getConfig().get("msg_size") > 32768:
+    if cfg.getConfig().get("msg_size") is None or cfg.getConfig().get("msg_size",32768) > 32768:
         max_msg_size = 32768
     else:
         max_msg_size = cfg.getConfig().get("msg_size")
@@ -142,11 +143,10 @@ async def _send_data(writer: asyncio.StreamWriter, data):
         logger.error(f"message size exceeds the limit of {max_msg_size} bytes.")
         return False
 
-    ip, port = writer.get_extra_info('peername')
-
     async with pt.peer_table_lock:
         for peer in pt.peer_table.get('conn'):
-            if peer.get('ip') == ip and peer.get('port') == port:
+            _, peer_writer = peer.get('conn')
+            if peer_writer == writer:
                 current_peer = peer
                 break
     try:
@@ -156,7 +156,7 @@ async def _send_data(writer: asyncio.StreamWriter, data):
             await writer.drain()
             return True
     except NameError:
-        logger.debug(f"No Peers with IP: {ip} and PORT: {port}.")
+        logger.debug(f"No Peers with IP: {peer.get("ip")} and PORT: {peer.get("port")}.")
 
 
 async def _read_message(reader: asyncio.StreamReader):
@@ -184,7 +184,7 @@ async def _send_to_peer(peer: pt.Peer, data: dict):
             return False
         return await _send_data(writer, data)
     except OSError:
-        pt.peer_table.get('conn').discard(peer)
+        pt.peer_table.get('conn').degrade(peer)
         if not writer.is_closing():
             writer.close()
             await writer.wait_closed()
@@ -193,7 +193,7 @@ async def _send_to_peer(peer: pt.Peer, data: dict):
 async def send_message(peer: pt.Peer, src: str, message: str):
     # Send a point-to-point message and expect an ACK from the peer.
     if not isinstance(peer, pt.Peer):
-        logger.error("A valid Peer instance is required to send a message.")
+        logger.debug("A valid Peer instance is required to send a message.")
         return False
 
     ttl = _get_ttl()//_get_ttl()
@@ -237,19 +237,20 @@ async def send_ack(peer: pt.Peer, message_id: str = ''):
     return await _send_to_peer(peer, ack_data)
 
 
-def _get_publish_targets(namespace: str):
+async def _get_publish_targets(namespace: str):
     # Select all connected peers in the requested namespace, or every connected peer for wildcard broadcasts.
-    connected_peers = list(pt.peer_table.get("conn") or set())
-    if namespace == "*":
-        return connected_peers
-    return [peer for peer in connected_peers if peer.get("namespace") == namespace]
+    async with pt.peer_table_lock:
+        connected_peers = list(pt.peer_table.get("conn") or set())
+        if namespace == "*":
+            return connected_peers
+        return [peer for peer in connected_peers if peer.get("namespace") == namespace]
 
 
 async def publish_message(namespace: str, src: str, message: str):
     # Publish a message to every connected peer in the requested namespace, or broadcast to all connected peers when namespace is *.
-    targets = _get_publish_targets(namespace or "")
+    targets = await _get_publish_targets(namespace or "")
     if not targets:
-        logger.warning("No connected peers found for publish namespace %s.", namespace or "*")
+        logger.debug("No connected peers found for publish namespace %s.", namespace or "*")
         return False
 
     message_id = str(uuid.uuid4())
@@ -264,7 +265,10 @@ async def publish_message(namespace: str, src: str, message: str):
     }
 
     for peer in targets:
-        await _send_to_peer(peer, data)
+        try:
+            await _send_to_peer(peer, data)
+        except:
+            logger.debug(f"Something went wrong when trying to publish to {peer}.")
 
     return True
 
@@ -320,10 +324,13 @@ async def handle_incoming_message(peer: pt.Peer):
             try:
                 message = await _read_message(reader)
 
+                if not message:
+                    break
+
                 msg_type = message.get("type")
 
                 if msg_type == "SEND":
-                    logger.info(f"[SEND] from {message.get('src')}: {message.get('payload')}")
+                    logger.info(f"[SEND] {message.get('src')}: {message.get('payload')}")
                     if message.get("require_ack"):
                         await send_ack(peer, message.get("msg_id"))
 
@@ -348,14 +355,16 @@ async def handle_incoming_message(peer: pt.Peer):
                     logger.debug(f"PING sent to {peer_id}, PONG received.")
         
                 elif msg_type == "PUB":
-                    logger.info(f"[PUB] from {message.get('src')}: {message.get('payload')}")
+                    dst = message.get("dst")
+                    target = '' if dst == '*' else f"@{dst}"
+                    logger.info(f"[PUB{target}] {message.get('src')}: {message.get('payload')}")
 
                 elif msg_type == "BYE":
                     logger.debug(f"Received BYE message from {message.get('src')}. Reason: {message.get('reason')}")
                     await send_bye_ok(peer, _local_peer_id(), message.get("msg_id"))
                     logger.info(f"Peer {peer_id} sent a BYE and disconnected.")
                     break
-        
+
                 elif msg_type == "BYE_OK":
                     future = peer.get('bye')
                     if not future.done():
@@ -364,7 +373,7 @@ async def handle_incoming_message(peer: pt.Peer):
                     logger.debug(f"Received BYE_OK message from {message.get('src')} acknowledging BYE with msg_id: {message.get('msg_id')}")
                     logger.debug(f"Peer {peer_id} received the BYE and it is being disconnected...")
                     break
-                
+
                 else:
                     logger.debug(f"Received unknown message type: {msg_type}")
 
@@ -375,9 +384,14 @@ async def handle_incoming_message(peer: pt.Peer):
 
     except (asyncio.TimeoutError, ConnectionError, TimeoutError) as e:
         logger.debug(f"Connection to {peer_id} closed while handling incoming message: {e}")
+        logger.debug(f"{traceback.format_exc()}")
+
+    except asyncio.IncompleteReadError as e:
+        logger.debug(f"Connection dropped before total read process. Partial data retrieved: {e.partial}")
 
     except Exception as e:
         logger.debug(f"Error handling incoming message of {peer_id}: {e}")
+
     finally:
         logger.debug("Exiting receive loop, closing stream writer.")
         logger.info(f"Closing connection to {peer_id}...")
@@ -385,5 +399,6 @@ async def handle_incoming_message(peer: pt.Peer):
         if writer is not None and not writer.is_closing():
             writer.close()
             await writer.wait_closed()
-        
-        pt.peer_table.get("conn").discard(peer)
+        async with pt.peer_table_lock:
+            pt.peer_table.degrade(peer)
+            logger.debug(f"{pt.peer_table.get("conn")}")
