@@ -86,7 +86,7 @@ def build_pong(msg_id, timestamp, ttl=cfg.getConfig().get('ttl',1)):
 def build_bye(src_id=_local_peer_id(), dst_id=None,msg_id=None,reason="Closing session...",ttl=cfg.getConfig().get('ttl',1)):
     return {
         "type": "BYE",
-        "msg_id": (msg_id or uuid.uuid4()),
+        "msg_id": str(msg_id or uuid.uuid4()),
         "src": src_id,
         "dst": dst_id,
         "reason": reason,
@@ -97,7 +97,7 @@ def build_bye(src_id=_local_peer_id(), dst_id=None,msg_id=None,reason="Closing s
 def build_bye_ok(src_id=_local_peer_id(), dst_id=None,msg_id=None,ttl=cfg.getConfig().get('ttl',1)):
     return {
         "type": "BYE_OK",
-        "msg_id": (msg_id or uuid.uuid4()),
+        "msg_id": str(msg_id or uuid.uuid4()),
         "src": src_id,
         "dst": dst_id,
         "ttl": ttl//ttl
@@ -163,12 +163,10 @@ async def _read_message(reader: asyncio.StreamReader):
     # Read one message from the peer stream and decode it into a Python dictionary.
     try:
         data = await reader.readuntil(b'\n')
-        # data = await reader.read()
 
         if not data:
             return None
         
-        # logger.info(f"{data}")
         return json.loads(data.decode('utf-8').strip('\n'))
 
     except asyncio.IncompleteReadError as exc:
@@ -225,7 +223,7 @@ async def send_message(peer: pt.Peer, src: str, message: str):
         logger.debug(f"ACK received from {_peer_id(peer)} with success!")
         return True
 
-    except asyncio.TimeoutError, TimeoutError:
+    except (asyncio.TimeoutError, TimeoutError):
         logger.debug(f"[Timeout] Failed to receive acknowledgment from {_peer_id(peer)} for the sent message.")
         return False
 
@@ -271,16 +269,33 @@ async def publish_message(namespace: str, src: str, message: str):
     return True
 
 
-async def send_bye(peer: pt.Peer, src: str = "", reason: str = "Closing session..."):
+async def send_bye(peer: pt.Peer, reason: str = "Closing session..."):
     # Notify the peer that the local side is closing the connection.
     if not isinstance(peer, pt.Peer):
-        logger.error("A valid Peer instance is required to send a BYE message.")
+        logger.debug("A valid Peer instance is required to send a BYE message.")
         return False
 
-    message_id = str(uuid.uuid4())
-    data = build_bye(dst_id=_peer_id(peer),reason=reason)
-    return await _send_to_peer(peer, data)
+    bye_dict = build_bye(dst_id=_peer_id(peer),reason=reason)
+    bye_message = (json.dumps(bye_dict) + '\n').encode()
 
+    lock = peer.get("lock")
+    _, writer = peer.get("conn")
+    timeout = (peer.get('rtt')/1000 + 1) if (peer.get('rtt') != -1) else cfg.getConfig().get("timeout",5)
+
+    try:
+        future = asyncio.get_event_loop().create_future()
+        peer.set('bye',future)
+        async with lock:
+            writer.write(bye_message)
+            await writer.drain()
+        
+        await asyncio.wait_for(future, timeout=timeout)
+        return True
+
+    except (asyncio.TimeoutError, TimeoutError):
+        logger.debug(f"[Timeout] Failed to receive BYE_OK from {_peer_id(peer)}. It will be disconnected either way.")
+        raise TimeoutError
+    
 
 async def send_bye_ok(peer: pt.Peer, src: str, msg_id_to_ack: str):
     # Acknowledge a BYE request from the peer.
@@ -302,64 +317,73 @@ async def handle_incoming_message(peer: pt.Peer):
 
     try:
         while True:
-            message = await _read_message(reader)
+            try:
+                message = await _read_message(reader)
 
-            msg_type = message.get("type")
+                msg_type = message.get("type")
 
-            if msg_type == "SEND":
-                logger.info(f"[SEND] from {message.get('src')}: {message.get('payload')}")
-                if message.get("require_ack"):
-                    await send_ack(peer, message.get("msg_id"))
+                if msg_type == "SEND":
+                    logger.info(f"[SEND] from {message.get('src')}: {message.get('payload')}")
+                    if message.get("require_ack"):
+                        await send_ack(peer, message.get("msg_id"))
 
-            elif msg_type == "ACK":
-                if peer.get('ack') and not peer.get('ack').done():
-                    peer.get('ack').set_result(True)
-                    logger.debug(f"An ACK was received from {peer_id}.")
+                elif msg_type == "ACK":
+                    if peer.get('ack') and not peer.get('ack').done():
+                        peer.get('ack').set_result(True)
+                        logger.debug(f"An ACK was received from {peer_id}.")
 
-            elif msg_type == "PING":
-                logger.debug(f"PING received from {peer_id}. Sending PONG...")
-                pong_sent = await _send_pong(peer,message.get('msg_id'),message.get('timestamp'))
-                if pong_sent:
-                    logger.debug(f"PONG sent to {peer_id}.")
+                elif msg_type == "PING":
+                    logger.debug(f"PING received from {peer_id}. Sending PONG...")
+                    pong_sent = await _send_pong(peer,message.get('msg_id'),message.get('timestamp'))
+                    if pong_sent:
+                        logger.debug(f"PONG sent to {peer_id}.")
+                    else:
+                        logger.debug(f"Something went wrong when sending the PONG to {peer_id}.")
+
+                elif msg_type == "PONG":
+                    future = peer.get('pong')
+                    if not future.done():
+                        future.set_result(message)
+
+                    logger.debug(f"PING sent to {peer_id}, PONG received.")
+        
+                elif msg_type == "PUB":
+                    logger.info(f"[PUB] from {message.get('src')}: {message.get('payload')}")
+
+                elif msg_type == "BYE":
+                    logger.debug(f"Received BYE message from {message.get('src')}. Reason: {message.get('reason')}")
+                    await send_bye_ok(peer, _local_peer_id(), message.get("msg_id"))
+                    logger.info(f"Peer {peer_id} sent a BYE and disconnected.")
+                    break
+        
+                elif msg_type == "BYE_OK":
+                    future = peer.get('bye')
+                    if not future.done():
+                        future.set_result(message)
+
+                    logger.debug(f"Received BYE_OK message from {message.get('src')} acknowledging BYE with msg_id: {message.get('msg_id')}")
+                    logger.debug(f"Peer {peer_id} received the BYE and it is being disconnected...")
+                    break
+                
                 else:
-                    logger.debug(f"Something went wrong when sending the PONG to {peer_id}.")
+                    logger.debug(f"Received unknown message type: {msg_type}")
 
-            elif msg_type == "PONG":
-                future = peer.get('pong')
-                if not future.done():
-                    future.set_result(message)
-
-                logger.debug(f"PING sent to {peer_id}, PONG received.")
-    
-            elif msg_type == "PUB":
-                logger.info(f"[PUB] from {message.get('src')}: {message.get('payload')}")
-
-            elif msg_type == "BYE":
-                logger.debug(f"Received BYE message from {message.get('src')}. Reason: {message.get('reason')}")
-                await send_bye_ok(peer, _local_peer_id(), message.get("msg_id"))
-                logger.info(f"Peer {peer_id} sent a BYE and disconnected.")
-                break
-    
-            elif msg_type == "BYE_OK":
-                logger.debug(f"Received BYE_OK message from {message.get('src')} acknowledging BYE with msg_id: {message.get('msg_id')}")
-                logger.info(f"Peer {peer_id} received the BYE and is being disconnected.")
-                break
-            
-            else:
-                logger.debug(f"Received unknown message type: {msg_type}")
+            except asyncio.CancelledError:
+                logger.debug(f"Sending BYE to {peer_id}...")
+                await send_bye(peer)
+                continue
 
     except (asyncio.TimeoutError, ConnectionError, TimeoutError) as e:
         logger.debug(f"Connection to {peer_id} closed while handling incoming message: {e}")
+
     except Exception as e:
         logger.debug(f"Error handling incoming message of {peer_id}: {e}")
     finally:
         logger.debug("Exiting receive loop, closing stream writer.")
         logger.info(f"Closing connection to {peer_id}...")
+        
         if writer is not None and not writer.is_closing():
             writer.close()
             await writer.wait_closed()
-
-
-# def start_incoming_message_task(peer: pt.Peer):
-#     # Start the inbound message loop in the background for a given peer.
-#     return asyncio.create_task(handle_incoming_message(peer))
+        
+        pt.peer_table.get("conn").discard(peer)

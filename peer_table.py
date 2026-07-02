@@ -4,6 +4,7 @@ import project_config as cfg
 
 logger = logging.getLogger("PeerTableManager")
 
+# Implementation of class Peer. It instantiates and stores all the information needed for each peer in the network, being connected or not.
 class Peer():
     '''Peers information inside a class (NAME, NAMESPACE, IP, PORT, direction (Inbound, Outbound ou STALE), number of remaining attempts to connect, connection objects (a 2-tuple of reader and writer) and its rtt to you)'''
     def __init__(self, NAME='',NAMESPACE='', IP='', PORT=65535):
@@ -13,13 +14,15 @@ class Peer():
         self.__port = PORT
         # Can be 'Inbound', 'Outbound','' and 'STALE'. If it is '', it means it is not connected and it is the first time it is appearing. If it is 'STALE', it is not connected, but the host has already tried 'max_reconnect_attempts' times.
         self.__direction = ''
-        self.__attempts = cfg.getConfig().get('max_reconnect_attempts',6)
-        self.__connection = None
-        self.__lock = asyncio.Lock()
-        self.__rtt = -1
-        self.__ack_future = None
-        self.__pong_future = None
+        self.__attempts = cfg.getConfig().get('max_reconnect_attempts',6) # Maximum amout of reconnect attempts allowed for each peer.
+        self.__connection = None  # (asyncio.StreamReader, asyncio.StreamWriter) pair for each peer. Needed to define how each peer will handle messages to be sent and received. 
+        self.__lock = asyncio.Lock()  # asyncio.Lock: a lock object to each peer, in order to use and modify its resources and info without interfering in other code that may use the same resource or info simultaneously.
+        self.__rtt = -1  # if RTT is -1, it is not connected (it takes an infinite time to get to the peer).
+        self.__ack_future = None  # asyncio.Future: Needed to timeout an ACK after a SEND .
+        self.__pong_future = None  # asyncio.Future: Needed to timeout a PING/PONG and measure the RTT.
+        self.__bye_future = None  # asyncio.Future: Needed to timeout the time to receive a BYE_OK from a peer.
 
+    # GET method - gets the attribute.
     def get(self,attribute:str=''):
         try:
             match attribute.lower():
@@ -45,13 +48,16 @@ class Peer():
                     return self.__ack_future
                 case 'pong':
                     return self.__pong_future
+                case 'bye':
+                    return self.__bye_future
                 case _:
                     raise AttributeError
 
         except AttributeError:
             logger.debug(f"A wrong attribute was passed to the method 'get' of {self}. Attribute: {attribute}.")
             return None
-        
+    
+    # SET method - changes the respective attribute.
     def set(self,attribute:str,new_value):
         try:
             match attribute.lower():
@@ -85,6 +91,9 @@ class Peer():
                 case 'pong':
                     self.__pong_future = new_value
                     return self.__pong_future
+                case 'bye':
+                    self.__bye_future = new_value
+                    return self.__bye_future
                 case _:
                     raise AttributeError
 
@@ -95,13 +104,16 @@ class Peer():
             logger.debug(f"A wrong attribute was passed to the method 'set' of {self}.")
             return None
     
+    # Decrease automatically the attempts of reconnection for the peer.
     def decrease_attempts(self,order=1):
         self.__attempts = self.__attempts - order
         return self.__attempts
     
+    # Reset peer attempts to 'max_reconnect_attempts'
     def reset_attempts(self):
         self.__attempts = cfg.getConfig().get('max_reconnect_attempts')
 
+    # Those methods are implemented in order to be possible to use it to compare to other instances and to build set-like objects with it.
     def __eq__(self, other):
         if not isinstance(other,Peer):
             return NotImplemented
@@ -120,11 +132,18 @@ class Peer():
     def __iter__(self):
         return self
 
+
+# The class PeerTable defines how the variable peer_table will hold information of each peer in the network. It has 2 attributes:
+# Not-Connected: a set representing all the peers not connected to you;
+# Connected: a set representing all the peers connected to you.
+# It is updated as necessary in the code.
+
 class PeerTable():
     def __init__(self):
         self.__connected:set[Peer] = set()
         self.__not_connected:set[Peer] = set()
 
+    # GET method - gets the state of each attribute.
     def get(self, state=''):
 
         if state.lower() == 'connected' or state.lower() == 'conn':
@@ -137,6 +156,7 @@ class PeerTable():
             logger.debug(f"An invalid parameter was passed to method 'get'.")
             return None
     
+    # SET method - Changes the attribute to a new value.
     def set(self, new_set:set, state=''):
 
         if state.lower() == 'connected' or state.lower() == 'conn':
@@ -151,7 +171,7 @@ class PeerTable():
             logger.debug(f"An invalid parameter was passed to method 'set'.")
             return None
 
-    # Moves from 'not_connected' state to 'connected' state
+    # Moves from 'not_connected' state to 'connected' state.
     def update(self, peer:Peer):
         try:
             self.__connected.add(peer)
@@ -159,6 +179,7 @@ class PeerTable():
         finally:
             pass
     
+    # Moves from 'connected' state to 'not_connected' state.
     def degrade(self, peer:Peer):
         try:
             self.__connected.remove(peer)
@@ -166,16 +187,20 @@ class PeerTable():
         finally:
             pass
         
-
+    
+    # Used to iterate over the object.
     def __contains__(self,peer):
         return (peer in self.__connected or peer in self.__not_connected)
     
+    # Used to represent the object in DEBUG logs.
     def __repr__(self):
         return f"'Connected':{[peer for peer in self.__connected]},'Not Connected':{[peer for peer in self.__not_connected]}"
 
     def __str__(self):
         return f"'Connected':{[peer for peer in self.__connected]},'Not Connected':{[peer for peer in self.__not_connected]}"
 
+# Initialize the peer_table as empty.
+# Initialize a lock object too, that will be necessary to change it and to get its state as the asynchronous code is running.
 peer_table = PeerTable()
 peer_table_lock = asyncio.Lock()
 

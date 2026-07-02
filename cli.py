@@ -201,7 +201,6 @@ async def _list_peers(namespace_token: str | None):
 
 
 async def _initial_bootstrap():
-    cfg.write_config()
     register_response = await rdv.register()
     if isinstance(register_response, dict) and register_response.get("ip"):
         cfg.addConfig("ip", register_response["ip"])
@@ -227,24 +226,30 @@ async def _shutdown_background_services(services):
 
     await asyncio.gather(*(service.task for service in services), return_exceptions=True)
 
-    try:
-        await p2p.terminate_peers()
-    except Exception:
-        pass
+    # try:
+    #     await p2p.terminate_peers()
+    # except Exception:
+    #     pass
 
-    try:
-        await rdv.unregister()
-    except Exception:
-        pass
+    # try:
+    #     await rdv.unregister()
+    # except Exception:
+    #     pass
 
 
 async def repl():
+    cfg.write_config()
+    validated = cfg.validate_config()
+
+    if not validated:
+        return None
+
     await _initial_bootstrap()
     services = await _start_background_services()
     # await p2p.main()
     # start auto-connect loop to attempt connections to all discovered peers
 
-    print("REPL iniciado. Digite /help para ver os comandos.")
+    print("REPL started. Type /help to see al the available commands.")
     _show_help()
 
     try:
@@ -320,10 +325,17 @@ async def repl():
             if raw == "/quit":
                 break
 
-            print("Comando desconhecido. Use /help.")
+            print("Unknown command. Use /help.")
 
+    except KeyboardInterrupt:
+        pass
+    
     finally:
         await _shutdown_background_services(services)
+        try:
+            await rdv.unregister()
+        except Exception:
+            pass
 
 def main():
     asyncio.run(repl())

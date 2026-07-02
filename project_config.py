@@ -143,6 +143,83 @@ def addConfig(new_config, new_value):
         logger.error(f"An error occurred when trying to update the config file with a new pair: ({new_config}:{new_value}).")
         return {}
     
+def validate_config():
+
+    cwd = os.path.dirname(os.path.realpath(__file__))
+    os.chdir(cwd)
+    file_path = pathlib.Path("config.json")
+    file_path.touch(exist_ok=True)
+
+    errors_dict = {}
+    errors_n = 0
+
+    try:
+        with open(file_path, "r") as config_file:            
+            config_dict = json.load(config_file)
+
+        keys = config_dict.keys()
+        for key in {"rdv_name", "rdv_port", "name", "port", "namespace", "msg_size", "timeout", "max_reconnect_attempts", "keep_alive_interval", "features"}: 
+            if key not in keys:
+                logger.error(f"Key: {key} is missing in the config file. Change it!")
+                errors_n += 1
+        
+        if errors_n != 0:
+            return False
+        
+        for key, value in config_dict.items():
+            match key:
+                case "msg_size" | "max_reconnect_attempts" | "rdv_port":
+                    if not isinstance(value,int):
+                        errors_dict[key] = f"Key: {key} must be an integer!"
+                
+                case "ttl" | "timeout" | "keep_alive_interval":
+                    if not isinstance(value,(int, float)):
+                        errors_dict[key] = f"Key: {key} must be an integer or a float!"
+                
+                case "rdv_name" | "name" | "namespace":
+                    if not isinstance(value,(str)):
+                        errors_dict[key] = f"Key: {key} must be a string!"
+
+                case "ip":
+                    if not isinstance(value,(str)):
+                        errors_dict[key] = f"Key: {key} must be a string!"
+                    else:
+                        ip_parts = value.split('.')
+                        if len(ip_parts) != 4:
+                            errors_dict[key] = f"IP: {value} is invalid. Format expected: X.X.X.X"
+                        for i in ip_parts:
+                            if not i.isnumeric():
+                                errors_dict[key] = f"IP: {value} is invalid. It needs to have an integer for each part."
+                                break
+                            if int(i) < 0 or int(i) > 255:
+                                errors_dict[key] = f"IP: {value} is invalid. Each part needs to be between 0 and 255."
+                                break
+
+                case "port":
+                    if not isinstance(value,int):
+                        errors_dict[key] = f"Key: {key} must be an integer."
+                    
+                    elif isPortUsed(value):
+                        for port in range(35500,65540,5):
+                            if (not isPortUsed(port)):
+                                change_config(port=port)
+                                break
+
+                case "features":
+                    if not isinstance(value,list):
+                        errors_dict[key] = f"Key: {key} must be a list. It can be empty."
+                
+        if len(errors_dict) != 0:
+            logger.error("Errors in config file:")
+            for error in errors_dict.values():
+                logger.error(error)
+            
+            return False
+    
+        return True
+    except json.JSONDecodeError:
+        logger.error("The config file does not have a valid JSON object. Verify it!")
+
 if __name__ == "__main__":
     write_config()
     print(getConfig())

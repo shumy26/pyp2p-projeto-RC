@@ -1,6 +1,7 @@
 import asyncio
 import state
 import logging
+import json
 
 import project_config as cfg
 import rendevouz_connection as rdv
@@ -11,58 +12,84 @@ from peer_table import *
 
 logger = logging.getLogger("P2PHandler")
 
-# -------- Exit Functions ----------
+# -------- 'Legacy' Exit Functions [Deprecated] ----------
 
-async def terminate_peers():
-    for peer in peer_table.get('conn'):
-        disconnected = await disconnect_peer(peer, *peer.get('conn'))
-        if not disconnected:
-            try:
-                _, writer = peer.get('conn')
-                if not writer.is_closing():
-                    writer.close()
-                    await writer.wait_closed()
-            except:
-                continue
+# async def terminate_peers():
+#     for peer in peer_table.get('conn'):
+#         disconnected = await disconnect_peer(peer, *peer.get('conn'))
+#         if not disconnected:
+#             try:
+#                 _, writer = peer.get('conn')
+#                 if not writer.is_closing():
+#                     writer.close()
+#                     await writer.wait_closed()
+#             except:
+#                 continue
     
-    peer_table.get('conn').clear()
-    peer_table.get('nconn').clear()
+#     peer_table.get('conn').clear()
+#     peer_table.get('nconn').clear()
 
-    return True
+#     return True
 
-async def disconnect_peer(peer:Peer, writer:asyncio.StreamWriter, reader:asyncio.StreamReader):
+# async def disconnect_peer(peer:Peer, reader:asyncio.StreamReader, writer:asyncio.StreamWriter):
 
-    my_id = _local_peer_id()
-    peer_id = _peer_id_from_peer_table(peer)
-    msg_size = cfg.getConfig().get('msg_size',32768)
-    lock = peer.get('lock')
-    try:
-        bye_request = (json.dumps(build_bye(my_id, peer_id)) + '\n').encode()
+#     my_id = _local_peer_id()
+#     peer_id = _peer_id_from_peer_table(peer)
+#     msg_size = cfg.getConfig().get('msg_size',32768)
+#     lock = peer.get('lock')
+#     try:
+#         bye_request = (json.dumps(build_bye(my_id, peer_id)) + '\n').encode()
         
+#         async with lock:
+#             writer.write(bye_request)
+#             await writer.drain()
+
+#             try:
+#                 response = await asyncio.wait_for(reader.read(msg_size), timeout=cfg.getConfig().get('timeout',5))
+#                 response_dict = json.loads(response.decode())
+#                 if response_dict.get('type') == 'BYE_OK':
+#                     pass
+#             except (asyncio.TimeoutError, json.JSONDecodeError, AttributeError):
+#                 pass
+
+#             if not writer.is_closing():
+#                 writer.close()
+#                 await writer.wait_closed()
+#             peer.set('rtt',-1)
+#             peer.set('direction','STALE')
+#             peer.set('conn', None)
+#             peer_table.degrade(peer)
+#         return True
+#     except:
+#         return False
+
+# General Function to Disconnect Peer from the network after PING requests and no PONG replies.
+
+async def disconnect_peer(peer:Peer):
+
+    lock = peer.get('lock')
+    _, writer = peer.get('conn')
+
+    try:
         async with lock:
-            writer.write(bye_request)
-            await writer.drain()
-
-            try:
-                response = await asyncio.wait_for(reader.read(msg_size), timeout=cfg.getConfig().get('timeout',5))
-                response_dict = json.loads(response.decode())
-                if response_dict.get('type') == 'BYE_OK':
-                    pass
-            except (asyncio.TimeoutError, json.JSONDecodeError, AttributeError):
-                pass
-
             if not writer.is_closing():
                 writer.close()
                 await writer.wait_closed()
+        
+        async with peer_table_lock:
             peer.set('rtt',-1)
             peer.set('direction','STALE')
             peer.set('conn', None)
+            peer.set('attempts',cfg.getConfig().get('max_reconnect_attempts',6))
             peer_table.degrade(peer)
+
         return True
     except:
         return False
 
 # -------- Loops ----------
+
+# This function loops constantly and awaits for ['ttl' - (0.5)] seconds to register your peer in the rendevouz (0.5 Seconds is an arbitrary security margin that, after some tests, seemed to work the best in order to not have DISCOVER requests while being disconnected from the network).
 
 async def loop_register():
     # Defines the ttl
@@ -75,8 +102,10 @@ async def loop_register():
     except asyncio.CancelledError:
         return None
 
+# This function loops, for ['discover_interval' - (0.4)] seconds, performing DISCOVER requests and updating the state of the PeerTable (0.4 seconds is an arbitrary security margin as well.)
+
 async def loop_discover():
-    time2discover = cfg.getConfig().get('discover_interval',10) # Gets the interval to discover (Default value = 10)
+    time2discover = cfg.getConfig().get('discover_interval',5) # Gets the interval to discover (Default value = 5)
     try:
         while True:
             d1 = await rdv.discover()
@@ -86,24 +115,28 @@ async def loop_discover():
     except asyncio.CancelledError:
         return None
 
-async def ainput(prompt: str = ""):
-    return await asyncio.to_thread(input, prompt)
+# The following code was just a test to see if the tasks were cancelled smoothly!
 
-async def exit_control():
-    try:
-        while True:
-            user_input = await ainput()
-            if user_input == '/quit':
-                curr_task = asyncio.current_task()
-                tasks = [t for t in asyncio.all_tasks() if t is not curr_task]
-                for t in tasks:
-                    t.cancel()
+# async def ainput(prompt: str = ""):
+#     return await asyncio.to_thread(input, prompt)
+
+# async def exit_control():
+#     try:
+#         while True:
+#             user_input = await ainput()
+#             if user_input == '/quit':
+#                 curr_task = asyncio.current_task()
+#                 tasks = [t for t in asyncio.all_tasks() if t is not curr_task]
+#                 for t in tasks:
+#                     t.cancel()
                 
-                terminated = await terminate_peers()
+#                 terminated = await terminate_peers()
 
-                return None
-    except:
-        return None
+#                 return None
+#     except:
+#         return None
+
+# This 
 
 async def _wait_for_state():
     interval = cfg.getConfig().get('discover_interval',10)
@@ -115,6 +148,8 @@ async def _wait_for_state():
     except:
         return None
 
+# Just a test to see if the PING and concurrent worked as expected.
+# ----------------------------------------------
 # async def _wait_and_ping():
 #     interval = cfg.getConfig().get('discover_interval',10)
 #     await asyncio.sleep(5*interval)  # Wait 5 loops to try to ping peers
@@ -130,40 +165,22 @@ async def _wait_for_state():
 #     except:
 #         return None
 
-# async def new_connection(event:asyncio.Event):
-#     if event.is_set():
-#         return True
-#     else:
-#         return False
 
-# async def all_peers_messages():
-#     interval = cfg.getConfig().get('discover_interval',10)
-
-#     while True:
-#         await asyncio.sleep(3*interval)
-#         try:
-#             tasks = [handle_incoming_message(peer) for peer in peer_table.get('conn')]
-#             result = asyncio.gather(*tasks)
-#         except:
-#             return None
-
-
-
-async def main():
-    try:
-        async with asyncio.TaskGroup() as tg:
-            tg.create_task(loop_register())
-            tg.create_task(loop_discover())
-            tg.create_task(_wait_for_state())
-            # tg.create_task(_wait_and_ping())
-            tg.create_task(exit_control())
-    except:
-        return None
+# async def main():
+#     try:
+#         async with asyncio.TaskGroup() as tg:
+#             tg.create_task(loop_register())
+#             tg.create_task(loop_discover())
+#             tg.create_task(_wait_for_state())
+#             # tg.create_task(_wait_and_ping())
+#             #tg.create_task(exit_control())
+#     except:
+#         return None
         
-if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-        asyncio.run(rdv.unregister())
-    except KeyboardInterrupt:
-        asyncio.run(rdv.unregister())
-        print('Ctrl-C')
+# if __name__ == '__main__':
+    # try:
+    #     asyncio.run(main())
+    #     asyncio.run(rdv.unregister())
+    # except KeyboardInterrupt:
+    #     asyncio.run(rdv.unregister())
+    #     print('Ctrl-C')

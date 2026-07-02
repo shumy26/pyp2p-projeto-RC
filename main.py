@@ -96,4 +96,5 @@ logger.addHandler(file_handler)
 
 
 # `cli.main()` already runs the asyncio loop internally; call it directly.
-cli.main()
+if __name__ == '__main__':
+    cli.main()
