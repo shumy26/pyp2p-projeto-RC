@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import time
-import uuid
 
 from peer_table import *
 import project_config as cfg
@@ -75,21 +74,26 @@ async def ping(peer:Peer):
         logger.debug("The peer refused the keep_alive connection.")
         disconnected = await disconnect_peer(peer)
         return None
+    
     except TimeoutError:
         logger.debug("Could not connect to peer due to timed out attempt.")
         disconnected = await disconnect_peer(peer)
         return None
+    
     except OSError:
         logger.debug("There was a network issue and it was not possible to connect to the peer.")
         disconnected = await disconnect_peer(peer)
         return None
+    
     except (InterruptedError, KeyboardInterrupt):
         logger.debug("The keep_alive loop was interrupted by a signal.")
         return None
+    
     except json.JSONDecodeError:
         logger.debug("The peer returned an invalid JSON response for keep_alive.")
         disconnected = await disconnect_peer(peer)
         return None
+    
     except asyncio.CancelledError:
         logger.debug(f"PING/PONG of {peer_id} was cancelled.")
         if not pong_future.done():

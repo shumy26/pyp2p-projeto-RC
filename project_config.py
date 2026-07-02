@@ -158,7 +158,7 @@ def validate_config():
             config_dict = json.load(config_file)
 
         keys = config_dict.keys()
-        for key in {"rdv_name", "rdv_port", "name", "port", "namespace", "msg_size", "timeout", "max_reconnect_attempts", "keep_alive_interval", "features", "discover_interval"}: 
+        for key in {"rdv_name", "rdv_port", "name", "port", "namespace", "msg_size", "timeout", "max_reconnect_attempts", "keep_alive_interval", "features"}: 
             if key not in keys:
                 logger.error(f"Key: {key} is missing in the config file. Change it!")
                 errors_n += 1
@@ -167,8 +167,8 @@ def validate_config():
             return False
         
         for key, value in config_dict.items():
-            match key.lower():
-                case "msg_size" | "max_reconnect_attempts" | "rdv_port" | "discover_interval":
+            match key:
+                case "msg_size" | "max_reconnect_attempts" | "rdv_port":
                     if not isinstance(value,int):
                         errors_dict[key] = f"Key: {key} must be an integer!"
                 

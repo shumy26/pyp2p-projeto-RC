@@ -85,7 +85,7 @@ logger.addHandler(console_handler)
 
 file_handler = logging.handlers.RotatingFileHandler(
     filename=os.path.join('logs', 'p2p_app.log'),
-    maxBytes=5 * 1024 * 1024, # 5 MB max of file
+    maxBytes=1 * 1024 * 1024, # 1 MB max of file
     backupCount=5,
     encoding='utf-8',
     mode='a'

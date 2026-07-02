@@ -156,18 +156,25 @@ async def register():
         logger.debug("An error occured when trying to decode the JSON on REGISTER.")
         return None
 
+    # Raised when the task is cancelled
+    except asyncio.CancelledError:
+        pass
+
     # Raised when the server refuses the connection
     except ConnectionRefusedError:
         logger.error("The server refused to connect.")
         return None
+    
     # Raised when the socket could not connect to the IP address in a given time
     except TimeoutError:
         logger.error("Could not connect to server due to timed out attempt.")
         return None
+    
     # Raised when there are possibly no routes to that server
     except OSError:
         logger.error("There was a network issue and it was not possible to connect to the server.")
         return None
+    
     # Raised when the user or the program interrupts the execution with a signal
     except (InterruptedError, KeyboardInterrupt):
         logger.error("The program was interrupted by a signal (like Ctrl+C).")
@@ -239,15 +246,21 @@ async def discover(namespace=None):
         logger.debug("An error occured when trying to decode the JSON on DISCOVER.")
         return None
     
+    except asyncio.CancelledError:
+        pass
+
     except ConnectionRefusedError:
         logger.error("The server refused to connect.")
         return None
+    
     except TimeoutError:
         logger.error("Could not connect to server due to timed out attempt.")
         return None
+    
     except OSError:
         logger.error("There was a network issue and it was not possible to connect to the server.")
         return None
+    
     except TypeError:
         logger.error("A type error occurred when a parameter was passed to a function.")
         try:
@@ -258,6 +271,7 @@ async def discover(namespace=None):
             return None
         except:
             return None  
+        
     except (InterruptedError, KeyboardInterrupt):
         logger.error("The program was interrupted by a signal (like Ctrl+C).")
         try:
@@ -335,19 +349,26 @@ async def unregister():
     except json.JSONDecodeError:
         logger.debug("An error occured when trying to decode the JSON on UNREGISTER.")
         return None
-
+    
+    except asyncio.CancelledError:
+        pass
+    
     except ConnectionRefusedError:
         logger.error("The server refused to connect.")
         return None
+    
     except TimeoutError:
         logger.error("Could not connect to server due to timed out attempt.")
         return None
+    
     except OSError:
         logger.error("There was a network issue and it was not possible to connect to the server.")
         return None
+    
     except (InterruptedError, KeyboardInterrupt):
         logger.error("The program was interrupted by a signal (like Ctrl+C).")
         return None
+
 
 if __name__ == '__main__':
     asyncio.run(register())

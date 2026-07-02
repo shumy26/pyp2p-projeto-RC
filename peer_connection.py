@@ -63,14 +63,17 @@ async def peer_connection(peer:Peer):
 
             case 'HELLO_OK':
                 # Change the attributes of this peer
-                peer.set('direction','Outbound')
-                peer.reset_attempts()
-                peer.set('conn',(reader,writer))
-
-                # Updates the PeerTable, changing state of peer from disconnected to connected.
                 async with peer_table_lock:
-                    peer_table.update(peer)
-                    logger.debug(f"{peer_table}")
+                    if peer not in peer_table.get('conn'):
+                        peer.set('direction','Outbound')
+                        peer.reset_attempts()
+                        peer.set('conn',(reader,writer))
+
+                        # Updates the PeerTable, changing state of peer from disconnected to connected.
+                        peer_table.update(peer)
+                        logger.debug(f"{peer_table}")
+                    else:
+                        raise LookupError
 
                 logger.info(f"Outbound Connection Established: {peer_id}.")
 
@@ -112,6 +115,11 @@ async def peer_connection(peer:Peer):
     except KeyError:
         logger.debug(f"Peer '{peer_id}' does not exist in PeerTable.")
         return False
+    
+    # Raised when the peer is already connected 
+    except LookupError:
+        logger.debug(f"The connection opened, but the peer was already connected.")
+        raise OSError
 
     # Raised when the user or the program interrupts the execution with a signal
     except (InterruptedError, KeyboardInterrupt):
@@ -135,10 +143,11 @@ async def handle_outbound_connection(peer):
 
     async with peer_table_lock:
         connected = peer_table.get('conn')
-        for conn_peer in connected:
-            if conn_peer == peer:
-                logger.debug("That peer is already connected.")
-                raise OSError
+        if connected:
+            for conn_peer in connected:
+                if conn_peer == peer:
+                    logger.debug("That peer is already connected.")
+                    raise OSError
 
     peer_id = _peer_id_from_peer_table(peer)
     connected = False
@@ -173,8 +182,9 @@ async def handle_outbound_connection(peer):
     except OSError:
         return False
 
-    except:
-        logger.debug(f"An error occured when trying to connect to {peer_id}.")
+    except Exception as e:
+        logger.debug(f"An error occured when trying to connect to {peer_id}: {e}.")
+        logger.debug(f"{traceback.format_exc()}")
         return False
 
 
@@ -228,35 +238,35 @@ async def handle_inbound_connection(reader:asyncio.StreamReader, writer:asyncio.
 
                 # Verify if the peer is in the PeerTable. If it isn't make a discover to see who he is.
                 async with peer_table_lock:
-                    isInsidePeerTable, peer_port = peer_table.isPeerIDNotConn(current_peer)
+                    isNotConn, peer_port = peer_table.isPeerIDNotConn(current_peer)
+                    isConn, _ = peer_table.isPeerIDConn(current_peer)
 
-                # If the peer is already connected, cancel the attempt.
-                if not peer_port:
-                    logger.debug("That peer is already connected. Cancelling connection...")
-                    raise OSError
-                
-                if not isInsidePeerTable:
-                    discover_dict = await rdv.discover()
-                    if discover_dict:
-                        peers_list = discover_dict.get("peers",{}).copy()
-                        for i in range(len(peers_list)):
-                            if (peers_list[i]["ip"], peers_list[i]["name"], peers_list[i]["namespace"]) == (peer_ip, name, namespace):
-                                current_peer.set("port",peers_list[i]["port"])
-                        
-                        if current_peer.get("port") == 0:
-                            logger.debug("This peer probably disconnected from the network.")
+                    # If the peer is already connected, cancel the attempt.
+                    if isConn:
+                        logger.debug("That peer is already connected. Cancelling connection...")
+                        raise OSError
+                    
+                    if not isNotConn:
+                        discover_dict = await rdv.discover()
+                        if discover_dict:
+                            peers_list = discover_dict.get("peers",{}).copy()
+                            for i in range(len(peers_list)):
+                                if (peers_list[i]["ip"], peers_list[i]["name"], peers_list[i]["namespace"]) == (peer_ip, name, namespace):
+                                    current_peer.set("port",peers_list[i]["port"])
+                            
+                            if current_peer.get("port") == 0:
+                                logger.debug("This peer probably disconnected from the network.")
+                                raise Exception
+                        else:
+                            logger.debug("There is no one in the network.")
                             raise Exception
+                    
                     else:
-                        logger.debug("There is no one in the network.")
-                        raise Exception
-                
-                else:
-                    current_peer.set("port", peer_port)
+                        current_peer.set("port", peer_port)
 
-                current_peer.set('direction','Inbound')
-                current_peer.set('conn',(reader,writer))
+                    current_peer.set('direction','Inbound')
+                    current_peer.set('conn',(reader,writer))
 
-                async with peer_table_lock:
                     peer_table.get("conn").add(current_peer)
                     peer_table.get("nconn").discard(current_peer)
                     logger.debug(f"{peer_table}")
