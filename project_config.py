@@ -68,7 +68,7 @@ def write_config():
         logger.debug("The config file already exists. So it was not created")
 
     except:
-        logger.error("Something went wrong when trying to write to 'config.json'.")
+        logger.debug("Something went wrong when trying to write to 'config.json'.")
 
 # This function changes the config file. It returns the old configuration if succeeded; otherwise, None.
 
