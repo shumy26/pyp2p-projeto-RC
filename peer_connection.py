@@ -1,9 +1,6 @@
 import asyncio
 import json
 import logging
-# import pathlib
-# import socket
-# import threading
 import traceback
 
 import project_config as cfg
@@ -202,14 +199,6 @@ async def handle_inbound_connection(reader:asyncio.StreamReader, writer:asyncio.
 
         current_peer = Peer(IP=peer_ip)
         
-        # From the peer table, we get the (reader, writer) of each peer. If it already exists (the socket is instantiated), it fails the connection with that peer.
-        # async with peer_table_lock:
-        #     connected = peer_table.get('conn')
-        #     for conn_peer in connected:
-        #         if (conn_peer.get("ip"), conn_peer.get("name"), conn_peer.get("namespace")) == (current_peer.get("ip"), current_peer.get("name"), current_peer.get("namespace")):
-        #             logger.debug("That peer is already connected.")
-        #             raise Exception
-
         # Read from the buffer the request.
         raw = await reader.readuntil(b'\n')
         

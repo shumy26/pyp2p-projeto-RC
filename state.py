@@ -9,6 +9,8 @@ from peer_table import *
 
 logger = logging.getLogger('StateManager')
 
+# This function changes the state of the PeerTable, meaning it updates the 'not_connected' attribute of the PeerTable instance, based on the most recent DISCOVER return, the peers currently connected and the ones not connected.
+
 async def state(discover_dict):
     try:
         # If the discover returned 'None' to this function, than it is a specific search for peers
@@ -34,24 +36,25 @@ async def state(discover_dict):
                 peer = Peer(peers_list[i]["name"], peers_list[i]["namespace"], peers_list[i]["ip"], peers_list[i]["port"])
                 new_set.add(peer)
 
-        # Updates PeerTable verifying if the peers connected to the rendevouz changed
+        # Updates PeerTable verifying if the peers connected to the rendevouz changed. This is made by doing
+        # some mathmatical operations upon sets.
         async with peer_table_lock:
-            logger.debug(f"PeerTable: {peer_table}")
+            # logger.debug(f"PeerTable: {peer_table}")
         
             union = peer_table.get('nconn').union(new_set)
-            logger.debug(f"union: {[(peer.get('ip'),peer.get('port')) for peer in union]}")
+            # logger.debug(f"union: {[(peer.get('ip'),peer.get('port')) for peer in union]}")
             diff = peer_table.get('nconn').difference(new_set)
-            logger.debug(f"diff: {[(peer.get('ip'),peer.get('port')) for peer in diff]}")
+            # logger.debug(f"diff: {[(peer.get('ip'),peer.get('port')) for peer in diff]}")
             new_set = union.difference(diff)
-            logger.debug(f"new_set1: {[(peer.get('ip'),peer.get('port')) for peer in new_set]}")
+            # logger.debug(f"new_set1: {[(peer.get('ip'),peer.get('port')) for peer in new_set]}")
 
             intersection = peer_table.get('conn').intersection(new_set)
-            logger.debug(f"intersection: {[(peer.get('ip'),peer.get('port')) for peer in intersection]}")
+            # logger.debug(f"intersection: {[(peer.get('ip'),peer.get('port')) for peer in intersection]}")
             new_set = new_set.difference(intersection)
-            logger.debug(f"new_set2: {[(peer.get('ip'),peer.get('port')) for peer in new_set]}")
+            # logger.debug(f"new_set2: {[(peer.get('ip'),peer.get('port')) for peer in new_set]}")
 
             peer_table.set(new_set, 'nconn')
-            logger.debug([(peer.get("ip"), peer.get("port")) for peer in peer_table.get('nconn')])
+            # logger.debug([(peer.get("ip"), peer.get("port")) for peer in peer_table.get('nconn')])
 
         # Verifies if the PeerTable exists. If it doesn't, create it
         cwd = os.path.dirname(os.path.realpath(__file__))
@@ -66,15 +69,17 @@ async def state(discover_dict):
             
             logger.debug("PeerTable.json was updated.")
             return peer_table
-        except:
-            logger.error("Something went wrong during the update of PeerTable.json")
-            return None
         
+        except Exception as e:
+            logger.debug(f"Something went wrong during the update of PeerTable.json: {e}.")
+            return None
+    
+    # Raised when it is cancelled.
     except asyncio.CancelledError:
         pass
     
     except Exception as e:
-        logger.debug(f"An error occured in state: {e}")
+        logger.debug(f"An error occured in state: {e}.")
         
 if __name__ == '__main__':
     asyncio.run(rdv.register())

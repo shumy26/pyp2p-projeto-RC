@@ -5,25 +5,20 @@
 # - Vinicius de Melo Moraes 231036274                                       #
 # - André Ricardo de Faria Santos 231025889                                 #
 # ------------------------------------------------------------------------- #
+
 import logging
 import logging.handlers
 import os
-# import asyncio
 
-# import peer_connection as pc
-# import peer_table as pt
-# import project_config as cfg
 import project_log as plog
-# import rendevouz_connection as rdv
-# import state
-# import message_router as router
-# import teste_parallelism2 as parallel
-# import p2p_client as p2p
 import cli as cli
 
 # ------ Formatting logs ------- #
 
 plog.create_logs()
+
+# Format the log to have colors in the StreamHandler and configure the RotateFileHandler to have a more complete format and rotate after 1 MB of file.
+# Also, sets the root logger and its level to DEBUG.
 
 class ColorLogFormatter(logging.Formatter):
     styles = {
@@ -95,6 +90,7 @@ file_handler.setFormatter(logging.Formatter('[%(levelname)s][%(asctime)s] %(name
 logger.addHandler(file_handler)
 
 
-# `cli.main()` already runs the asyncio loop internally; call it directly.
+# Calls 'cli.main()' that starts the REPL.
+
 if __name__ == '__main__':
     cli.main()

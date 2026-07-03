@@ -29,20 +29,25 @@ HELP_TEXT = """
 ║  /quit                        Quit the application             ║
 ╚════════════════════════════════════════════════════════════════╝"""
 
-
+# Creates a custom class with dunder methods to organize and operate tasks running in the background ("Background Services").
 @dataclass
 class BackgroundService:
     task: asyncio.Task
     name: str
 
+# Show the HELP text.
 def _show_help():
     print(HELP_TEXT)
 
+# Show the current ID that you are registered with.
+def _show_currentID():
+    logger.info(router._local_peer_id())
 
+# Handles asynchronous inputs.
 async def _ainput(prompt: str = "p2p> "):
     return await asyncio.to_thread(input, prompt)
 
-
+# Parses the namespace specified by /pub and /peers.
 def _parse_namespace_token(token: str | None):
     if token is None:
         return None
@@ -52,7 +57,7 @@ def _parse_namespace_token(token: str | None):
         return token[1:]
     return None
 
-
+# Returns the PeerID based on the current instance of "Peer".
 def _peer_identity(peer) -> str:
     if not isinstance(peer, pt.Peer):
         return "Unknown"
@@ -62,11 +67,11 @@ def _peer_identity(peer) -> str:
         return f"{name}@{namespace}"
     return name or namespace or "Unknown"
 
-
+# Finds the peer in the connected, not connected or in both by its ID.
 async def _find_peer_by_id(peer_id: str, state:str='both'):
     async with pt.peer_table_lock:
-        connected = list(pt.peer_table.get("conn") or set())
-        not_connected = list(pt.peer_table.get("nconn") or set())
+        connected = pt.peer_table.get("conn") or set()
+        not_connected = pt.peer_table.get("nconn") or set()
 
     match state:
         case 'both':
@@ -85,7 +90,7 @@ async def _find_peer_by_id(peer_id: str, state:str='both'):
                     return peer
             return None
 
-
+# List the peers found in a DISCOVER, its pair IP:PORT, TTL, and when it expires.
 def _print_peers(discover_dict):
     if not discover_dict or not isinstance(discover_dict, dict):
         print("No peer was found within the search.")
@@ -101,7 +106,7 @@ def _print_peers(discover_dict):
         if peer_id != my_id: 
             print(f"• {peer_id} | {peer.get('ip')}:{peer.get('port')} | ttl = {peer.get('ttl')}s | Expires in: {peer.get('expires_in')}")
 
-
+# Prints all the currently connected peers, its direction, pair IP:PORT, and RTT.
 def _print_connections():
     peers = list(pt.peer_table.get("conn") or set())
     if not peers:
@@ -114,7 +119,7 @@ def _print_connections():
             f"• {peer_id} | {peer.get('direction')} | {peer.get('ip')}:{peer.get('port')} | RTT = {(str(peer.get('rtt')) + 'ms') if peer.get('rtt') != -1 else "Not yet measured"}"
         )
 
-
+# Prints the RTT of the current connected peers and the total average
 def _print_rtt():
     peers = list(pt.peer_table.get("conn") or set())
     valid_rtts = []
@@ -136,7 +141,7 @@ def _print_rtt():
         avg = sum(valid_rtts) / len(valid_rtts)
         print(f"Average RTT: {avg:.2f} ms")
 
-
+# Tries to reconciliate with STALE peers.
 async def _reconnect():
     try:
         not_conn_peers = [asyncio.create_task(pc.handle_outbound_connection(not_conn_peer)) for not_conn_peer in pt.peer_table.get('nconn') if not_conn_peer.get('direction') == 'STALE']
@@ -149,34 +154,40 @@ async def _reconnect():
         logger.error(f"An error occured when trying to reconciliate.")
         return False
 
-
+# Send a message of type SEND to the peer of that ID.
 async def _send_direct(peer_id: str, message: str):
     peer = await _find_peer_by_id(peer_id,'conn')
     if peer is None:
         print(f"Peer '{peer_id}' not connected.")
         return False
 
-    ok = await router.send_message(peer, router._local_peer_id(), message)
-    if ok:
-        return True
-    else:
-        return False
+    try:
+        ok = await router.send_message(peer, router._local_peer_id(), message)
+        if ok:
+            return True
+        else:
+            return False
+    except NotImplementedError:
+        return None
 
-
+# Publish a message to all, or to the specified namespace.
 async def _publish(namespace_token: str, message: str):
     namespace = _parse_namespace_token(namespace_token)
     if namespace is None:
-        print("Use /pub * <mensagem> or /pub #<namespace> <mensagem>.")
-        return
+        print("Use /pub * <message> or /pub #<namespace> <message>.")
+        return None
 
-    ok = await router.publish_message(namespace, router._local_peer_id(), message)
-    if ok:
-        target = "all peers" if namespace == "*" else f"namespace: #{namespace}"
-        print(f"Message published to {target}.")
-    else:
-        print("No peer connected to receive the publish.")
+    try:
+        ok = await router.publish_message(namespace, router._local_peer_id(), message)
+        if ok:
+            target = "all peers" if namespace == "*" else f"namespace: #{namespace}"
+            print(f"Message published to {target}.")
+        else:
+            print("No peer connected to receive the publish.")
+    except NotImplementedError:
+        return None
 
-
+# Makes a DISCOVER and list all the peers or the peers in the specified namespace.
 async def _list_peers(namespace_token: str | None):
     namespace = _parse_namespace_token(namespace_token)
     if namespace_token is not None and namespace is None:
@@ -188,7 +199,7 @@ async def _list_peers(namespace_token: str | None):
     await state.state(discover_dict)
     _print_peers(discover_dict)
 
-
+# Makes the first REGISTER, DISCOVER and updates the state of the PeerTable.
 async def _initial_bootstrap():
     register_response = await rdv.register()
     if isinstance(register_response, dict) and register_response.get("ip"):
@@ -199,7 +210,7 @@ async def _initial_bootstrap():
     discover_dict = await rdv.discover()
     await state.state(discover_dict)
 
-
+# Starts the tasks that handles the continuous REGISTER and DISCOVER/STATE loop, and the task to wait for a second to initiate connections with peers OUTBOUND and INBOUND.
 async def _start_background_services():
     services = [
         BackgroundService(asyncio.create_task(p2p.loop_register()), "register-loop"),
@@ -208,7 +219,7 @@ async def _start_background_services():
     ]
     return services
 
-
+# Runs over all the tasks in the current event loop and cancels each one of them except for this one.
 async def _shutdown_background_services(services):
     curr_task = asyncio.current_task()
     tasks = [t for t in asyncio.all_tasks() if t is not curr_task]
@@ -217,6 +228,8 @@ async def _shutdown_background_services(services):
             t.cancel()
     
     return True
+
+# Main function of CLI. Verify if it exist a config file (if not, create a standard one); validate it; REGISTER in the rendevouz, make a DISCOVER, updates the PeerTable once, creating a file for it; starts the process of trying to connect to other peers; and awaits for commands.
 
 async def repl():
     cfg.write_config()
@@ -227,32 +240,36 @@ async def repl():
 
     await _initial_bootstrap()
     services = await _start_background_services()
-    # await p2p.main()
-    # start auto-connect loop to attempt connections to all discovered peers
 
-    print("REPL iniciado. Digite /help para ver os comandos.")
+    # Show HELP text and the current ID that your peer is registered as.
+
+    print("REPL started. Type /help to see the available commands.")
     _show_help()
+    _show_currentID()
 
     try:
         while True:
             raw = (await _ainput("\np2p> ")).strip()
             if not raw:
                 continue
-
+            
+            # Show help message
             if raw == "/help":
                 _show_help()
                 continue
-
+            
+            # List Peers available in the rendevouz.
             if raw.startswith("/peers"):
                 parts = shlex.split(raw)
                 token = parts[1] if len(parts) > 1 else None
                 await _list_peers(token)
                 continue
-
+            
+            # Message a peer based on its ID.
             if raw.startswith("/msg "):
                 parts = shlex.split(raw, posix=True)
                 if len(parts) < 3:
-                    print("Uso: /msg <peer_id> <mensagem>")
+                    print("Use: /msg <peer_id> <message>")
                     continue
                 peer_id = parts[1]
                 message = raw.split(None, 2)[2]
@@ -262,32 +279,39 @@ async def repl():
                 except OSError:
                     logger.info("The peer already disconnected.")
                     continue
-
+            
+            # Publish to all or to a namespace.
             if raw.startswith("/pub "):
                 parts = shlex.split(raw, posix=True)
                 if len(parts) < 3:
-                    print("Uso: /pub * <mensagem> ou /pub #<namespace> <mensagem>")
+                    print("Use: /pub * <message> or /pub #<namespace> <message>")
                     continue
                 await _publish(parts[1], raw.split(None, 2)[2])
                 continue
-
+            
+            # Print current connected peers.
             if raw == "/conn":
                 _print_connections()
                 continue
-
+            
+            # Print the RTT for each peer and the total average.
             if raw == "/rtt":
                 _print_rtt()
                 continue
-
+            
+            # Tries to reconnect with peers not connected and are STALE.
             if raw == "/reconnect":
                 parts = shlex.split(raw)
                 await _reconnect()
                 continue
-
+            
+            # Changes LOG level of the StreamHandler. The RotateFileHandler is always on DEBUG mode 
+            # as it is important to have this log somewhere. The root logger is also always on DEBUG mode, 
+            # to guarantee that this always works.
             if raw.startswith("/log "):
                 parts = shlex.split(raw)
                 if len(parts) < 2:
-                    print("Uso: /log <DEBUG|INFO|WARNING|ERROR|CRITICAL>")
+                    print("Use: /log <DEBUG|INFO|WARNING|ERROR|CRITICAL>")
                     continue
 
                 level_name = parts[1].upper()
@@ -302,15 +326,19 @@ async def repl():
                         handler.setLevel(level)
                 print(f"Log level adjusted to: {level_name}.")
                 continue
-
+            
+            # Quits the loop and the REPL
             if raw == "/quit":
                 break
 
-            print("Comando desconhecido. Use /help.")
+            print("Unknown command. Use /help.")
 
+    # If KeyboardInterrupt is raised, it acts the same as /quit.
     except KeyboardInterrupt:
         pass
     
+    # Waits for all the background tasks to be cancelled and UNREGISTER if the peer is still registered
+    # in the rendevouz.
     finally:
         await _shutdown_background_services(services)
         try:
@@ -318,9 +346,9 @@ async def repl():
         except Exception:
             pass
 
+# The function 'main()' just runs the repl() function, starting the event loop on the current thread.
 def main():
     asyncio.run(repl())
-
 
 if __name__ == "__main__":
     main()

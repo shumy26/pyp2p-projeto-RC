@@ -34,7 +34,7 @@ async def ping(peer:Peer):
     peer.set('pong',pong_future)
 
     try:
-        # Build the PING request
+        # Build the PING request.
 
         ping_dict = build_ping(ttl=ttl)
         request_string = json.dumps(ping_dict) + '\n'
@@ -42,7 +42,7 @@ async def ping(peer:Peer):
         while tries < attempts:
             logger.debug(f"Sending PING: {json.dumps(ping_dict, ensure_ascii=False)} (Attempt {tries}).")
 
-            # Send the PING request to peer
+            # Send the PING request to peer.
             async with peer.get('lock'):
                 writer.write(request_string.encode())
                 await writer.drain()

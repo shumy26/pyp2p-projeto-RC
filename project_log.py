@@ -4,6 +4,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Create the Logs directory if it does not exists already.
+
 def create_logs():
     try:
         cwd = os.path.dirname(os.path.realpath(__file__))

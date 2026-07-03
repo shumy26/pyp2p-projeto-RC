@@ -1,13 +1,10 @@
 import asyncio
 import state
 import logging
-import json
 
 import project_config as cfg
 import rendevouz_connection as rdv
 import peer_connection as pc
-import keep_alive as ka
-from message_router import _local_peer_id, _peer_id as _peer_id_from_peer_table, build_bye, handle_incoming_message, send_bye
 from peer_table import *
 
 logger = logging.getLogger("P2PHandler")
@@ -63,6 +60,8 @@ logger = logging.getLogger("P2PHandler")
 #     except:
 #         return False
 
+# ------------ Exit function ------------- #
+
 # General Function to Disconnect Peer from the network after PING requests and no PONG replies.
 
 async def disconnect_peer(peer:Peer):
@@ -86,18 +85,11 @@ async def disconnect_peer(peer:Peer):
     except:
         return False
 
-# async def terminate_all_peers():
-
-#     async with peer_table_lock:
-#         for conn_peer in peer_table.get('conn'):
-            
-#             reader, writer = conn_peer.get('conn')
-        
-#             break
-
 # -------- Loops ----------
 
-# This function loops constantly and awaits for ['ttl' - (0.5)] seconds to register your peer in the rendevouz (0.5 Seconds is an arbitrary security margin that, after some tests, seemed to work the best in order to not have DISCOVER requests while being disconnected from the network).
+# This function loops constantly and awaits for ['ttl' - (0.5)] seconds to register your peer in the rendevouz
+# (0.5 Seconds is an arbitrary security margin that, after some tests, seemed to work the best in order to 
+# not have DISCOVER requests while being disconnected from the network).
 
 async def loop_register():
     # Defines the ttl
@@ -110,20 +102,33 @@ async def loop_register():
     except asyncio.CancelledError:
         return None
 
-# This function loops, for ['discover_interval' - (0.4)] seconds, performing DISCOVER requests and updating the state of the PeerTable (0.4 seconds is an arbitrary security margin as well.)
+# This function loops, for ['discover_interval'] seconds, performing DISCOVER requests and updating the state of the PeerTable.
 
 async def loop_discover():
-    time2discover = cfg.getConfig().get('discover_interval',5) # Gets the interval to discover (Default value = 5)
+    time2discover = cfg.getConfig().get('discover_interval',5) # Gets the interval to discover (Default value = 10)
     try:
         while True:
             d1 = await rdv.discover()
             d2 = await state.state(d1)
             logger.debug(f"Peers discovered: {d2}")
-            await asyncio.sleep(time2discover - 0.4)
+            await asyncio.sleep(time2discover)
     except asyncio.CancelledError:
         return None
 
-# The following code was just a test to see if the tasks were cancelled smoothly!
+# This function stops for 1 second waiting for the first update of the PeerTable and 
+# starting the process of connecting actively to peers [OUTBOUND] and listening to connections attempts [INBOUND].
+# This first second is just to give asyncio time to run a few other tasks before trying to connect.
+
+async def _wait_for_state():
+    await asyncio.sleep(1) # Waits 1 second to try to connect to peers
+
+    try:
+        tasks = (pc.start_outbound(), pc.start_inbound())
+        res = await asyncio.gather(*tasks,return_exceptions=True)
+    except:
+        return None
+    
+# The following code was just a test to see if the tasks were cancelled smoothly.
 
 # async def ainput(prompt: str = ""):
 #     return await asyncio.to_thread(input, prompt)
@@ -144,19 +149,7 @@ async def loop_discover():
 #     except:
 #         return None
 
-# This 
-
-async def _wait_for_state():
-    interval = cfg.getConfig().get('discover_interval',10)
-    await asyncio.sleep(3) # Wait 3 seconds to try to connect to peers
-
-    try:
-        tasks = (pc.start_outbound(), pc.start_inbound())
-        res = await asyncio.gather(*tasks,return_exceptions=True)
-    except:
-        return None
-
-# Just a test to see if the PING and concurrent worked as expected.
+# Just a test to see if the PING and concurrent tasks worked as expected.
 # ----------------------------------------------
 # async def _wait_and_ping():
 #     interval = cfg.getConfig().get('discover_interval',10)

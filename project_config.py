@@ -56,7 +56,9 @@ def write_config():
         config_dict["msg_size"] = 32768 # 32 kB
         config_dict["timeout"] = 5 # Time to seconds to receive an ACK
         config_dict["max_reconnect_attempts"] = 6
-        # config_dict["ttl"] = 3600
+        # config_dict["ttl"] = 3600 # TTL is taken as an optional parameter.
+                                    # If it exists, it uses it; if it not, it lets the rendevouz decides the TTL (2h).
+        config_dict["msg_ttl"] = 1
         config_dict["discover_interval"] = 5
         config_dict["keep_alive_interval"] = 30
         config_dict["features"] = ["ack"]
@@ -72,7 +74,7 @@ def write_config():
 
 # This function changes the config file. It returns the old configuration if succeeded; otherwise, None.
 
-def change_config(rdv_name=None, rdv_port=None, name=None, port=None, namespace=None, msg_size=None, timeout=None, ttl=None, max_reconnect_attempts=None, discover_interval=None, keep_alive_interval=None, features=None, **kwargs):
+def change_config(rdv_name=None, rdv_port=None, name=None, port=None, namespace=None, msg_size=None, timeout=None, ttl=None, msg_ttl=None, max_reconnect_attempts=None, discover_interval=None, keep_alive_interval=None, features=None, **kwargs):
     try:
         logger.debug("Trying to change the config file...")
         # Returns a dictionary that contains the local variables scope
@@ -142,9 +144,12 @@ def addConfig(new_config, new_value):
     except:
         logger.error(f"An error occurred when trying to update the config file with a new pair: ({new_config}:{new_value}).")
         return {}
-    
+
+# This function validates the config file before starting the REPL.
+
 def validate_config():
 
+    # Verifies the existence and path of the config file.
     cwd = os.path.dirname(os.path.realpath(__file__))
     os.chdir(cwd)
     file_path = pathlib.Path("config.json")
@@ -157,8 +162,9 @@ def validate_config():
         with open(file_path, "r") as config_file:            
             config_dict = json.load(config_file)
 
+        # Verifies if there are no keys missing
         keys = config_dict.keys()
-        for key in {"rdv_name", "rdv_port", "name", "port", "namespace", "msg_size", "timeout", "max_reconnect_attempts", "keep_alive_interval", "features"}: 
+        for key in {"rdv_name", "rdv_port", "name", "port", "namespace", "msg_size", "timeout", "max_reconnect_attempts", "keep_alive_interval", "features", "msg_ttl"}: 
             if key not in keys:
                 logger.error(f"Key: {key} is missing in the config file. Change it!")
                 errors_n += 1
@@ -166,9 +172,11 @@ def validate_config():
         if errors_n != 0:
             return False
         
+        # Verifies if all the keys are of the correct type and print which ones aren't.
+
         for key, value in config_dict.items():
             match key:
-                case "msg_size" | "max_reconnect_attempts" | "rdv_port":
+                case "msg_size" | "max_reconnect_attempts" | "rdv_port" | "msg_ttl":
                     if not isinstance(value,int):
                         errors_dict[key] = f"Key: {key} must be an integer!"
                 
@@ -217,8 +225,11 @@ def validate_config():
             return False
     
         return True
+    
+    # Raised when the config file is not written correctly.
     except json.JSONDecodeError:
         logger.error("The config file does not have a valid JSON object. Verify it!")
+        return False
 
 if __name__ == "__main__":
     write_config()
