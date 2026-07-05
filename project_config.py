@@ -129,7 +129,7 @@ def getConfig():
         
         return config_dict
     except:
-        logger.error("Something went wrong when trying to reach 'config.json'.")
+        logger.debug("Something went wrong when trying to reach 'config.json'.")
         return {}
 
 # This function adds a new configuration to the config file
