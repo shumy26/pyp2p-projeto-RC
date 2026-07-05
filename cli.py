@@ -41,7 +41,7 @@ def _show_help():
 
 # Show the current ID that you are registered with.
 def _show_currentID():
-    logger.info(router._local_peer_id())
+    logger.info(f"You've been registered as: {router._local_peer_id()}.")
 
 # Handles asynchronous inputs.
 async def _ainput(prompt: str = "p2p> "):
